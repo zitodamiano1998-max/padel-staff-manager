@@ -4,6 +4,7 @@ import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
 } from 'lucide-react'
+import NotificationBell from './NotificationBell'
 
 export default function Layout({ children }) {
   const { profile, signOut } = useAuth()
@@ -63,7 +64,7 @@ export default function Layout({ children }) {
             )}
           </nav>
 
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <div className="text-right hidden md:block">
               <div className="font-sans text-sm font-semibold text-warm-dark leading-tight">
                 {profile?.first_name} {profile?.last_name}
@@ -72,6 +73,7 @@ export default function Layout({ children }) {
                 {profile?.role_name}{profile?.is_manager && ' · Manager'}
               </div>
             </div>
+            <NotificationBell />
             <button onClick={handleLogout}
               className="p-2 rounded-lg hover:bg-cream-200 text-warm-brown hover:text-warm-dark transition"
               title="Esci">
