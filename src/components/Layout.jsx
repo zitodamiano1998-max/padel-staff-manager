@@ -5,6 +5,7 @@ import {
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
+import InstallPrompt from './InstallPrompt'
 
 export default function Layout({ children }) {
   const { profile, signOut } = useAuth()
@@ -20,6 +21,8 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-cream-100">
+      <InstallPrompt />
+
       <header className="bg-white border-b border-cream-300 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
 
