@@ -50,6 +50,8 @@ export default function ShiftFormModal({ shift, preset, staff, roles, templates 
         staff_id: preset.staff_id || '',
         role_id: preset.role_id || '',
         date: preset.date || '',
+        ...(preset.start_time ? { start_time: preset.start_time } : {}),
+        ...(preset.end_time ? { end_time: preset.end_time } : {}),
       }))
     }
   }, [shift, preset])

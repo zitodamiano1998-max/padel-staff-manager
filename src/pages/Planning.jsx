@@ -127,13 +127,22 @@ export default function Planning() {
     return map
   }, [shifts, availability, approvedLeaves])
 
-  const handleCellClick = (staffMember, day) => {
+  const handleCellClick = (staffMember, day, timePreset) => {
     if (!isManager) return
-    setPresetCell({
+    const preset = {
       staff_id: staffMember?.id || '',
       role_id: staffMember?.role_id || '',
       date: formatDateISO(day),
-    })
+    }
+    if (timePreset) {
+      // Click su timeline: preset di ora di inizio (quarto d'ora) e fine = inizio + 4h
+      const startHour = String(timePreset.hour).padStart(2, '0')
+      const startMinute = String(timePreset.minute).padStart(2, '0')
+      const endHour = Math.min(timePreset.hour + 4, 23)
+      preset.start_time = `${startHour}:${startMinute}`
+      preset.end_time = `${String(endHour).padStart(2, '0')}:${startMinute}`
+    }
+    setPresetCell(preset)
     setEditingShift(null)
     setModalOpen(true)
   }
@@ -167,9 +176,13 @@ export default function Planning() {
     if (!over) return
 
     const shift = active.data.current?.shift
-    const newStaffId = over.data.current?.staffId
+    if (!shift) return
+
+    // La nuova timeline manda solo dateISO (drag sposta solo il giorno, dipendente resta)
+    // La vecchia griglia per dipendenti mandava staffId + dateISO
     const newDateISO = over.data.current?.dateISO
-    if (!shift || !newStaffId || !newDateISO) return
+    const newStaffId = over.data.current?.staffId || shift.staff_id
+    if (!newDateISO) return
 
     const oldDateISO = startDateOfShift(shift.start_at)
     if (shift.staff_id === newStaffId && oldDateISO === newDateISO) return
@@ -436,72 +449,299 @@ function StatBox({ label, value, accent }) {
   )
 }
 
+// ============================================================================
+// VISTA TIMELINE — orari a sinistra, 7 giorni in alto
+// ============================================================================
+const TIMELINE_START_HOUR = 8
+const TIMELINE_END_HOUR = 24
+const HOUR_HEIGHT = 60 // px per ora
+const TIME_COL_WIDTH = 64 // px
+
 function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, onCellClick, onShiftClick, isManager }) {
+  // Costruisco lista turni per giorno (tutti i dipendenti insieme)
+  const shiftsByDay = useMemo(() => {
+    const map = new Map()
+    for (const day of days) {
+      const dateISO = formatDateISO(day)
+      const dayShifts = []
+      for (const s of staff) {
+        const key = `${s.id}|${dateISO}`
+        const arr = shiftsByStaffDay.get(key) || []
+        dayShifts.push(...arr)
+      }
+      map.set(dateISO, dayShifts)
+    }
+    return map
+  }, [days, staff, shiftsByStaffDay])
+
+  const totalHours = TIMELINE_END_HOUR - TIMELINE_START_HOUR
+  const gridHeight = totalHours * HOUR_HEIGHT
+
+  const hours = []
+  for (let h = TIMELINE_START_HOUR; h < TIMELINE_END_HOUR; h++) hours.push(h)
+
   return (
     <div className="bg-white rounded-2xl border border-cream-300 overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[900px] grid"
-          style={{ gridTemplateColumns: '220px repeat(7, 1fr)' }}>
-
-          <div className="bg-cream-50 border-b border-r border-cream-300 px-4 py-3 sticky left-0 z-10">
-            <span className="font-sans text-xs uppercase tracking-wider text-warm-brown">
-              Dipendente
-            </span>
+        <div className="min-w-[900px]">
+          {/* Header dei giorni */}
+          <div className="grid sticky top-0 z-20 bg-white"
+            style={{ gridTemplateColumns: `${TIME_COL_WIDTH}px repeat(7, 1fr)` }}>
+            <div className="border-b border-r border-cream-300 bg-cream-50" />
+            {days.map((day) => (
+              <div key={day.toISOString()}
+                className={`border-b border-cream-300 px-3 py-3 text-center ${
+                  isToday(day) ? 'bg-terracotta-50' : 'bg-cream-50'
+                }`}>
+                <div className={`font-sans text-xs uppercase tracking-wider capitalize ${
+                  isToday(day) ? 'text-terracotta-700 font-bold' : 'text-warm-brown'
+                }`}>
+                  {formatDayHeader(day)}
+                </div>
+              </div>
+            ))}
           </div>
-          {days.map((day) => (
-            <div key={day.toISOString()}
-              className={`border-b border-cream-300 px-3 py-3 ${
-                isToday(day) ? 'bg-terracotta-50' : 'bg-cream-50'
-              }`}>
-              <div className={`font-sans text-xs uppercase tracking-wider capitalize ${
-                isToday(day) ? 'text-terracotta-700 font-bold' : 'text-warm-brown'
-              }`}>
-                {formatDayHeader(day)}
-              </div>
-            </div>
-          ))}
 
-          {staff.map((s) => (
-            <div key={s.id} className="contents">
-              <div className="border-b border-r border-cream-200 sticky left-0 bg-white z-10 px-4 py-3 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-serif font-semibold text-xs flex-shrink-0"
-                  style={{ backgroundColor: s.roles?.color || '#C97D60' }}>
-                  {s.first_name?.[0]}{s.last_name?.[0]}
-                </div>
-                <div className="min-w-0">
-                  <div className="font-sans text-sm font-semibold text-warm-dark truncate">
-                    {s.first_name} {s.last_name}
-                  </div>
-                  <div className="font-sans text-xs text-warm-brown truncate">
-                    {s.roles?.name || '—'}
-                  </div>
-                </div>
-              </div>
+          {/* Timeline body */}
+          <div className="grid relative"
+            style={{
+              gridTemplateColumns: `${TIME_COL_WIDTH}px repeat(7, 1fr)`,
+              height: `${gridHeight}px`,
+            }}>
 
-              {days.map((day) => {
-                const dateISO = formatDateISO(day)
-                const key = `${s.id}|${dateISO}`
-                const dayShifts = shiftsByStaffDay.get(key) || []
-                return (
-                  <DroppableCell key={day.toISOString()}
-                    staffId={s.id}
-                    dateISO={dateISO}
-                    isManager={isManager}
-                    isToday={isToday(day)}
-                    onClick={() => onCellClick(s, day)}>
-                    {dayShifts.map((shift) => (
-                      <ShiftBlock key={shift.id}
-                        shift={shift}
-                        onClick={(e) => onShiftClick(e, shift)}
-                        isDraggable={isManager}
-                        conflicts={conflictsByShift?.get(shift.id) || []} />
-                    ))}
-                  </DroppableCell>
-                )
-              })}
+            {/* Colonna orari */}
+            <div className="border-r border-cream-300 bg-cream-50 relative">
+              {hours.map((h) => (
+                <div key={h}
+                  className="absolute left-0 right-0 px-2 -translate-y-1/2 text-right"
+                  style={{ top: `${(h - TIMELINE_START_HOUR) * HOUR_HEIGHT}px` }}>
+                  <span className="font-sans text-[11px] text-warm-brown tabular-nums">
+                    {String(h).padStart(2, '0')}:00
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+
+            {/* Colonne giorni */}
+            {days.map((day) => {
+              const dateISO = formatDateISO(day)
+              const dayShifts = shiftsByDay.get(dateISO) || []
+              return (
+                <DayColumn key={day.toISOString()}
+                  day={day}
+                  dateISO={dateISO}
+                  shifts={dayShifts}
+                  conflictsByShift={conflictsByShift}
+                  isManager={isManager}
+                  onShiftClick={onShiftClick}
+                  onEmptyClick={(hour, minute) => {
+                    // L'utente ha cliccato su uno spot vuoto: chiamo onCellClick con preset orario
+                    onCellClick(null, day, { hour, minute })
+                  }} />
+              )
+            })}
+          </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function DayColumn({ day, dateISO, shifts, conflictsByShift, isManager, onShiftClick, onEmptyClick }) {
+  // Gestisco droppable dell'intera colonna giorno
+  const { setNodeRef, isOver } = useDroppable({
+    id: `day-${dateISO}`,
+    disabled: !isManager,
+    data: { dateISO, type: 'day-column' },
+  })
+
+  // Calcolo posizioni assolute dei turni con gestione overlap
+  const positionedShifts = useMemo(() => positionShifts(shifts, dateISO), [shifts, dateISO])
+
+  const handleClick = (e) => {
+    if (!isManager) return
+    // Solo se il click è sulla colonna stessa, non su un turno
+    if (e.target !== e.currentTarget) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const y = e.clientY - rect.top
+    const totalMinutes = (y / HOUR_HEIGHT) * 60
+    const hour = TIMELINE_START_HOUR + Math.floor(totalMinutes / 60)
+    // Snap a 15 minuti
+    const minute = Math.floor((totalMinutes % 60) / 15) * 15
+    onEmptyClick(hour, minute)
+  }
+
+  return (
+    <div ref={setNodeRef}
+      onClick={handleClick}
+      className={`relative border-r border-cream-200 last:border-r-0 transition ${
+        isToday(day) ? 'bg-terracotta-50/20' : ''
+      } ${isOver && isManager ? 'bg-terracotta-100/40' : ''} ${isManager ? 'cursor-pointer hover:bg-cream-50/50' : ''}`}>
+      {/* Linee orarie di sfondo */}
+      {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR }, (_, i) => (
+        <div key={i}
+          className="absolute left-0 right-0 border-t border-cream-100 pointer-events-none"
+          style={{ top: `${i * HOUR_HEIGHT}px` }} />
+      ))}
+
+      {/* Turni posizionati */}
+      {positionedShifts.map(({ shift, top, height, leftPct, widthPct }) => (
+        <ShiftBlockTimeline key={shift.id}
+          shift={shift}
+          top={top}
+          height={height}
+          leftPct={leftPct}
+          widthPct={widthPct}
+          isDraggable={isManager}
+          conflicts={conflictsByShift?.get(shift.id) || []}
+          onClick={(e) => onShiftClick(e, shift)} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Calcola posizione assoluta di ogni turno nella colonna giorno.
+ * Gestisce sovrapposizioni dividendo orizzontalmente lo spazio.
+ */
+function positionShifts(shifts, dateISO) {
+  if (shifts.length === 0) return []
+
+  // Per ogni turno calcolo top/height in pixel rispetto alla colonna
+  const items = shifts.map((shift) => {
+    const start = new Date(shift.start_at)
+    const end = new Date(shift.end_at)
+
+    // Determino se il turno inizia in un altro giorno (overnight verso questo giorno)
+    const startDateISO = formatDateISO(start)
+    const isOvernightFromYesterday = startDateISO !== dateISO
+
+    let startMin, endMin
+    if (isOvernightFromYesterday) {
+      // Turno iniziato il giorno precedente: parte da 00:00 di oggi
+      startMin = 0
+      const endHere = new Date(dateISO + 'T00:00:00')
+      endHere.setDate(endHere.getDate() + 1)
+      const realEnd = end > endHere ? endHere : end
+      endMin = (realEnd.getHours() * 60 + realEnd.getMinutes())
+      if (endMin === 0 && realEnd > new Date(dateISO + 'T00:00:00')) endMin = 24 * 60
+    } else {
+      startMin = start.getHours() * 60 + start.getMinutes()
+      // Se il turno sfora la mezzanotte, taglio a 24:00
+      if (formatDateISO(end) !== dateISO && !(end.getHours() === 0 && end.getMinutes() === 0 && formatDateISO(new Date(end.getTime() - 1)) === dateISO)) {
+        endMin = 24 * 60
+      } else {
+        endMin = end.getHours() * 60 + end.getMinutes()
+        if (endMin === 0) endMin = 24 * 60 // mezzanotte = fine giornata
+      }
+    }
+
+    // Clamp al range visibile della timeline
+    const visibleStartMin = Math.max(startMin, TIMELINE_START_HOUR * 60)
+    const visibleEndMin = Math.min(endMin, TIMELINE_END_HOUR * 60)
+    if (visibleEndMin <= visibleStartMin) return null
+
+    const top = ((visibleStartMin - TIMELINE_START_HOUR * 60) / 60) * HOUR_HEIGHT
+    const height = ((visibleEndMin - visibleStartMin) / 60) * HOUR_HEIGHT
+    return { shift, top, height, startMin: visibleStartMin, endMin: visibleEndMin }
+  }).filter(Boolean)
+
+  // Algoritmo column-packing per turni sovrapposti
+  // Ogni turno viene messo nella prima "colonna" libera; se nessuna è libera ne aggiungo una
+  items.sort((a, b) => a.startMin - b.startMin)
+  const columns = [] // array di array: ogni inner array è una colonna con turni in sequenza
+  for (const item of items) {
+    let placed = false
+    for (const col of columns) {
+      const last = col[col.length - 1]
+      if (last.endMin <= item.startMin) {
+        col.push(item)
+        item._col = columns.indexOf(col)
+        placed = true
+        break
+      }
+    }
+    if (!placed) {
+      columns.push([item])
+      item._col = columns.length - 1
+    }
+  }
+
+  // Per ogni item determino in quante colonne è "incluso" (overlap concorrente)
+  // Per semplicità uso il totale globale di colonne: i turni si dividono lo spazio uguale
+  const totalCols = Math.max(1, columns.length)
+  return items.map((item) => ({
+    shift: item.shift,
+    top: item.top,
+    height: item.height,
+    leftPct: (item._col / totalCols) * 100,
+    widthPct: (1 / totalCols) * 100,
+  }))
+}
+
+function ShiftBlockTimeline({ shift, top, height, leftPct, widthPct, isDraggable, conflicts, onClick }) {
+  const {
+    attributes, listeners, setNodeRef: setDragRef, transform, isDragging,
+  } = useDraggable({
+    id: `shift-${shift.id}`,
+    disabled: !isDraggable,
+    data: { shift },
+  })
+
+  const color = shift.roles?.color || '#C97D60'
+  const isDraft = shift.status === 'draft'
+  const hasErrorConflict = conflicts.some((c) => c.severity === 'error')
+  const sm = shift.staff_members
+  const initials = sm ? `${sm.first_name?.[0] || ''}${sm.last_name?.[0] || ''}` : ''
+
+  const transformStyle = transform
+    ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+    : undefined
+
+  return (
+    <div ref={setDragRef}
+      {...attributes}
+      {...listeners}
+      onClick={(e) => { e.stopPropagation(); onClick(e) }}
+      className={`absolute rounded-lg overflow-hidden transition-shadow ${
+        isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      } ${isDragging ? 'opacity-30 z-30' : 'hover:shadow-md z-10'}`}
+      style={{
+        top: `${top}px`,
+        left: `calc(${leftPct}% + 2px)`,
+        width: `calc(${widthPct}% - 4px)`,
+        height: `${Math.max(height, 24)}px`,
+        backgroundColor: isDraft ? 'transparent' : color + 'CC',
+        border: isDraft
+          ? `2px dashed ${color}`
+          : (hasErrorConflict ? `2px solid #DC2626` : `1px solid ${color}`),
+        boxShadow: hasErrorConflict ? 'inset 0 0 0 2px rgba(220, 38, 38, 0.3)' : undefined,
+        transform: transformStyle,
+      }}>
+      <div className={`w-full h-full px-2 py-1 ${isDraft ? 'text-warm-dark' : 'text-white'} flex flex-col justify-start overflow-hidden`}>
+        <div className="font-sans text-[11px] font-semibold tabular-nums leading-tight">
+          {formatTimeFromISO(shift.start_at)}–{formatTimeFromISO(shift.end_at)}
+        </div>
+        {sm && height >= 36 && (
+          <div className="font-sans text-[11px] truncate leading-tight mt-0.5">
+            {sm.first_name} {sm.last_name?.[0]}.
+          </div>
+        )}
+        {height >= 50 && shift.roles?.name && (
+          <div className={`font-sans text-[10px] truncate leading-tight opacity-90 ${isDraft ? 'text-warm-brown' : ''}`}>
+            {shift.roles.name}
+          </div>
+        )}
+        {isDraft && height >= 36 && (
+          <div className="font-sans text-[9px] uppercase tracking-wider opacity-70 mt-auto">
+            Bozza
+          </div>
+        )}
+        {hasErrorConflict && (
+          <div className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold">
+            !
+          </div>
+        )}
       </div>
     </div>
   )
