@@ -28,10 +28,25 @@ function arrayBufferToBase64(buffer) {
 // Verifica se push notifications sono supportate dal browser
 export function isPushSupported() {
   return (
+    typeof navigator !== 'undefined' &&
     'serviceWorker' in navigator &&
+    typeof window !== 'undefined' &&
     'PushManager' in window &&
     'Notification' in window
   )
+}
+
+// Diagnostica: spiega perché push non sono supportate (per debug)
+export function whyNotSupported() {
+  const reasons = []
+  if (typeof navigator === 'undefined') reasons.push('navigator non disponibile')
+  else if (!('serviceWorker' in navigator)) reasons.push('Service Worker non supportato')
+  if (typeof window === 'undefined') reasons.push('window non disponibile')
+  else {
+    if (!('PushManager' in window)) reasons.push('PushManager non supportato (iOS richiede PWA installata)')
+    if (!('Notification' in window)) reasons.push('Notification API non disponibile')
+  }
+  return reasons.join(', ') || 'Sconosciuto'
 }
 
 // Ottiene lo stato corrente del permesso

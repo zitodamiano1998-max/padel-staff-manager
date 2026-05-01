@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import {
   isPushSupported, getPushPermissionStatus, isCurrentlySubscribed,
-  subscribeToPush, unsubscribeFromPush,
+  subscribeToPush, unsubscribeFromPush, whyNotSupported,
 } from '../lib/pushClient'
 
 export default function NotificationBell() {
@@ -31,13 +31,22 @@ export default function NotificationBell() {
 
   // Init push state
   useEffect(() => {
+    refreshPushState()
+  }, [])
+
+  // Re-check stato push ogni volta che apro il dropdown
+  useEffect(() => {
+    if (open) refreshPushState()
+  }, [open])
+
+  const refreshPushState = async () => {
     const supported = isPushSupported()
     setPushSupported(supported)
-    if (supported) {
-      setPushPermission(getPushPermissionStatus())
-      isCurrentlySubscribed().then(setPushSubscribed)
-    }
-  }, [])
+    if (!supported) return
+    setPushPermission(getPushPermissionStatus())
+    const subInBrowser = await isCurrentlySubscribed()
+    setPushSubscribed(subInBrowser)
+  }
 
   // Carica notifiche + Realtime
   useEffect(() => {
@@ -178,45 +187,54 @@ export default function NotificationBell() {
           </div>
 
           {/* Push toggle */}
-          {pushSupported && (
-            <div className="px-4 py-3 border-b border-cream-200 bg-cream-50 flex-shrink-0">
-              {pushPermission === 'denied' ? (
-                <div className="flex items-start gap-2 font-sans text-xs text-warm-brown">
-                  <BellOff size={14} className="text-red-600 flex-shrink-0 mt-0.5" />
-                  <span>
-                    Push disabilitate dal browser. Vai nelle impostazioni del sito per riabilitarle.
-                  </span>
+          <div className="px-4 py-3 border-b border-cream-200 bg-cream-50 flex-shrink-0">
+            {!pushSupported ? (
+              <div className="flex items-start gap-2 font-sans text-xs text-warm-brown">
+                <BellOff size={14} className="text-warm-brown flex-shrink-0 mt-0.5" />
+                <div>
+                  <div>Push non disponibili su questo device.</div>
+                  <div className="mt-1 opacity-70">{whyNotSupported()}</div>
+                  <div className="mt-1 opacity-70">
+                    💡 Su iPhone: installa l'app dalla schermata Home (Safari → Condividi → Aggiungi alla Home), poi apri da lì.
+                  </div>
                 </div>
-              ) : pushSubscribed ? (
-                <div className="flex items-center gap-2">
-                  <BellRing size={14} className="text-sage-600 flex-shrink-0" />
-                  <span className="font-sans text-xs text-warm-dark flex-1">
-                    Notifiche push <strong>attive</strong> su questo device
-                  </span>
-                  <button onClick={handleDisablePush} disabled={pushBusy}
-                    className="font-sans text-xs text-terracotta-600 hover:text-terracotta-700 font-semibold">
-                    Disattiva
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Bell size={14} className="text-warm-brown flex-shrink-0" />
-                  <span className="font-sans text-xs text-warm-dark flex-1">
-                    Ricevi notifiche anche con app chiusa
-                  </span>
-                  <button onClick={handleEnablePush} disabled={pushBusy}
-                    className="font-sans text-xs font-semibold bg-terracotta-400 hover:bg-terracotta-500 text-white px-3 py-1 rounded-lg transition disabled:opacity-50">
-                    {pushBusy ? '...' : 'Attiva'}
-                  </button>
-                </div>
-              )}
-              {pushError && (
-                <div className="mt-2 font-sans text-xs text-red-700 bg-red-50 rounded px-2 py-1">
-                  {pushError}
+              </div>
+            ) : pushPermission === 'denied' ? (
+              <div className="flex items-start gap-2 font-sans text-xs text-warm-brown">
+                <BellOff size={14} className="text-red-600 flex-shrink-0 mt-0.5" />
+                <span>
+                  Push disabilitate dal browser. Vai nelle impostazioni del sito per riabilitarle.
+                </span>
+              </div>
+            ) : pushSubscribed ? (
+              <div className="flex items-center gap-2">
+                <BellRing size={14} className="text-sage-600 flex-shrink-0" />
+                <span className="font-sans text-xs text-warm-dark flex-1">
+                  Notifiche push <strong>attive</strong> su questo device
+                </span>
+                <button onClick={handleDisablePush} disabled={pushBusy}
+                  className="font-sans text-xs text-terracotta-600 hover:text-terracotta-700 font-semibold">
+                  Disattiva
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-warm-brown flex-shrink-0" />
+                <span className="font-sans text-xs text-warm-dark flex-1">
+                  Ricevi notifiche anche con app chiusa
+                </span>
+                <button onClick={handleEnablePush} disabled={pushBusy}
+                  className="font-sans text-xs font-semibold bg-terracotta-400 hover:bg-terracotta-500 text-white px-3 py-1 rounded-lg transition disabled:opacity-50">
+                  {pushBusy ? '...' : 'Attiva'}
+                </button>
+              </div>
+            )}
+            {pushError && (
+              <div className="mt-2 font-sans text-xs text-red-700 bg-red-50 rounded px-2 py-1">
+                {pushError}
                 </div>
               )}
             </div>
-          )}
 
           <div className="overflow-y-auto flex-1">
             {notifications.length === 0 ? (
