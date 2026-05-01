@@ -1,8 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, CheckCheck } from 'lucide-react'
+import {
+  Bell, CheckCheck,
+  Palmtree, Calendar, ArrowLeftRight, Check, X, Hand, BellRing, BellOff,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import {
+  isPushSupported, getPushPermissionStatus, isCurrentlySubscribed,
+  subscribeToPush, unsubscribeFromPush,
+} from '../lib/pushClient'
 
 export default function NotificationBell() {
   const { profile } = useAuth()
@@ -11,16 +18,31 @@ export default function NotificationBell() {
   const dropdownRef = useRef(null)
   const navigate = useNavigate()
 
-  // Carica notifiche + sottoscrive Realtime
+  // Stato push notifications
+  const [pushSupported, setPushSupported] = useState(false)
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [pushPermission, setPushPermission] = useState('default')
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState(null)
+
+  // Init push state
+  useEffect(() => {
+    const supported = isPushSupported()
+    setPushSupported(supported)
+    if (supported) {
+      setPushPermission(getPushPermissionStatus())
+      isCurrentlySubscribed().then(setPushSubscribed)
+    }
+  }, [])
+
+  // Carica notifiche + Realtime
   useEffect(() => {
     if (!profile?.id) return
     fetchNotifications()
 
     const channel = supabase
       .channel('notif-' + profile.id)
-      .on(
-        'postgres_changes',
-        {
+      .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
@@ -30,9 +52,7 @@ export default function NotificationBell() {
           setNotifications((prev) => [payload.new, ...prev].slice(0, 30))
         }
       )
-      .on(
-        'postgres_changes',
-        {
+      .on('postgres_changes', {
           event: 'UPDATE',
           schema: 'public',
           table: 'notifications',
@@ -51,7 +71,7 @@ export default function NotificationBell() {
     }
   }, [profile?.id])
 
-  // Click fuori → chiude dropdown
+  // Click fuori
   useEffect(() => {
     const handler = (e) => {
       if (open && dropdownRef.current && !dropdownRef.current.contains(e.target)) {
@@ -63,13 +83,13 @@ export default function NotificationBell() {
   }, [open])
 
   const fetchNotifications = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('notifications')
       .select('*')
       .eq('recipient_id', profile.id)
       .order('created_at', { ascending: false })
       .limit(30)
-    if (!error) setNotifications(data || [])
+    if (data) setNotifications(data)
   }
 
   const unreadCount = notifications.filter((n) => !n.is_read).length
@@ -92,6 +112,34 @@ export default function NotificationBell() {
     if (!n.is_read) await markRead(n.id)
     setOpen(false)
     if (n.link) navigate(n.link)
+  }
+
+  // ---- Push handlers ----
+  const handleEnablePush = async () => {
+    setPushBusy(true)
+    setPushError(null)
+    try {
+      await subscribeToPush(profile.id)
+      setPushSubscribed(true)
+      setPushPermission(getPushPermissionStatus())
+    } catch (err) {
+      setPushError(err.message)
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  const handleDisablePush = async () => {
+    setPushBusy(true)
+    setPushError(null)
+    try {
+      await unsubscribeFromPush()
+      setPushSubscribed(false)
+    } catch (err) {
+      setPushError(err.message)
+    } finally {
+      setPushBusy(false)
+    }
   }
 
   return (
@@ -120,6 +168,47 @@ export default function NotificationBell() {
               </button>
             )}
           </div>
+
+          {/* Push toggle */}
+          {pushSupported && (
+            <div className="px-4 py-3 border-b border-cream-200 bg-cream-50 flex-shrink-0">
+              {pushPermission === 'denied' ? (
+                <div className="flex items-start gap-2 font-sans text-xs text-warm-brown">
+                  <BellOff size={14} className="text-red-600 flex-shrink-0 mt-0.5" />
+                  <span>
+                    Push disabilitate dal browser. Vai nelle impostazioni del sito per riabilitarle.
+                  </span>
+                </div>
+              ) : pushSubscribed ? (
+                <div className="flex items-center gap-2">
+                  <BellRing size={14} className="text-sage-600 flex-shrink-0" />
+                  <span className="font-sans text-xs text-warm-dark flex-1">
+                    Notifiche push <strong>attive</strong> su questo device
+                  </span>
+                  <button onClick={handleDisablePush} disabled={pushBusy}
+                    className="font-sans text-xs text-terracotta-600 hover:text-terracotta-700 font-semibold">
+                    Disattiva
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Bell size={14} className="text-warm-brown flex-shrink-0" />
+                  <span className="font-sans text-xs text-warm-dark flex-1">
+                    Ricevi notifiche anche con app chiusa
+                  </span>
+                  <button onClick={handleEnablePush} disabled={pushBusy}
+                    className="font-sans text-xs font-semibold bg-terracotta-400 hover:bg-terracotta-500 text-white px-3 py-1 rounded-lg transition disabled:opacity-50">
+                    {pushBusy ? '...' : 'Attiva'}
+                  </button>
+                </div>
+              )}
+              {pushError && (
+                <div className="mt-2 font-sans text-xs text-red-700 bg-red-50 rounded px-2 py-1">
+                  {pushError}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="overflow-y-auto flex-1">
             {notifications.length === 0 ? (
@@ -173,10 +262,6 @@ function NotificationItem({ n, onClick }) {
   )
 }
 
-import {
-  Palmtree, Calendar, ArrowLeftRight, Check, X, Hand, Bell as BellIcon,
-} from 'lucide-react'
-
 const ICONS = {
   leave_pending: { El: Palmtree, bg: 'bg-amber-100', fg: 'text-amber-700' },
   leave_approved: { El: Check, bg: 'bg-sage-100', fg: 'text-sage-700' },
@@ -187,7 +272,7 @@ const ICONS = {
   swap_pending: { El: ArrowLeftRight, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
   swap_approved: { El: Check, bg: 'bg-sage-100', fg: 'text-sage-700' },
   swap_rejected: { El: X, bg: 'bg-red-100', fg: 'text-red-700' },
-  default: { El: BellIcon, bg: 'bg-cream-200', fg: 'text-warm-brown' },
+  default: { El: Bell, bg: 'bg-cream-200', fg: 'text-warm-brown' },
 }
 
 function timeAgo(iso) {
