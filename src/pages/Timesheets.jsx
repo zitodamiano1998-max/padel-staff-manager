@@ -861,7 +861,7 @@ function formatTimeRounded(date) {
 
 function computeWorkedMs(entries, nowDate) {
   let total = 0
-  let workStart = null
+  let workStart = null // Date arrotondato per clock_in, esatto per break_end
   const sorted = [...entries].sort((a, b) => a.event_time.localeCompare(b.event_time))
   for (const e of sorted) {
     let t = new Date(e.event_time)
@@ -870,16 +870,22 @@ function computeWorkedMs(entries, nowDate) {
     if (e.event_type === 'clock_in' || e.event_type === 'clock_out') {
       t = roundDateToHalfHour(t)
     }
-    if (e.event_type === 'clock_in' || e.event_type === 'break_end') {
-      workStart = t
+    if (e.event_type === 'clock_in') {
+      // Se c'è già un turno aperto, ignora questo IN (probabile duplicato/manuale)
+      if (workStart === null) workStart = t
+    } else if (e.event_type === 'break_end') {
+      // Stessa logica: se non c'è un workStart aperto, riapre il conteggio
+      if (workStart === null) workStart = t
     } else if (e.event_type === 'break_start' || e.event_type === 'clock_out') {
-      if (workStart) {
-        total += t - workStart
+      if (workStart !== null) {
+        // Calcola solo se l'OUT è dopo l'IN; ignora coppie invertite/duplicate (Δ ≤ 0)
+        if (t > workStart) total += t - workStart
         workStart = null
       }
+      // Se workStart è null, OUT senza IN: ignora (probabile duplicato)
     }
   }
-  if (workStart) total += nowDate - workStart
+  if (workStart) total += Math.max(0, nowDate - workStart)
   return Math.max(0, total)
 }
 
