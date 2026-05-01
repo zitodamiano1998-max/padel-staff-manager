@@ -25,6 +25,10 @@ export default function NotificationBell() {
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState(null)
 
+  // Live toast per notifiche realtime
+  const [liveToast, setLiveToast] = useState(null)
+  const toastTimeoutRef = useRef(null)
+
   // Init push state
   useEffect(() => {
     const supported = isPushSupported()
@@ -50,6 +54,10 @@ export default function NotificationBell() {
         },
         (payload) => {
           setNotifications((prev) => [payload.new, ...prev].slice(0, 30))
+          // Mostra toast in-app
+          if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
+          setLiveToast(payload.new)
+          toastTimeoutRef.current = setTimeout(() => setLiveToast(null), 6000)
         }
       )
       .on('postgres_changes', {
@@ -226,8 +234,59 @@ export default function NotificationBell() {
           </div>
         </div>
       )}
+
+      {/* Live toast (notifica realtime in arrivo) */}
+      {liveToast && (
+        <LiveToast notification={liveToast}
+          onClose={() => setLiveToast(null)}
+          onClick={() => {
+            handleItemClick(liveToast)
+            setLiveToast(null)
+          }} />
+      )}
     </div>
   )
+}
+
+function LiveToast({ notification, onClose, onClick }) {
+  const Icon = ICONS[notification.type] || ICONS.default
+  const tone = getToneFromType(notification.type)
+  const colorMap = {
+    positive: { bg: 'bg-sage-50', border: 'border-sage-300', accent: 'text-sage-700', iconBg: 'bg-sage-100' },
+    info: { bg: 'bg-white', border: 'border-cream-300', accent: 'text-warm-dark', iconBg: 'bg-cream-100' },
+    warning: { bg: 'bg-amber-50', border: 'border-amber-300', accent: 'text-amber-700', iconBg: 'bg-amber-100' },
+  }
+  const c = colorMap[tone]
+  return (
+    <div className={`fixed top-4 right-4 z-50 ${c.bg} border ${c.border} rounded-2xl shadow-lg p-4 max-w-sm w-[calc(100vw-2rem)] sm:w-96 animate-slide-in-right`}>
+      <div className="flex items-start gap-3">
+        <button onClick={onClick} className="flex items-start gap-3 flex-1 text-left min-w-0">
+          <div className={`w-9 h-9 ${c.iconBg} rounded-xl flex items-center justify-center flex-shrink-0 ${c.accent}`}>
+            <Icon size={16} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-sans font-semibold text-sm text-warm-dark mb-0.5">
+              {notification.title}
+            </div>
+            <div className="font-sans text-xs text-warm-brown line-clamp-2">
+              {notification.body}
+            </div>
+          </div>
+        </button>
+        <button onClick={onClose}
+          className="p-1 rounded-lg hover:bg-white/50 text-warm-brown hover:text-warm-dark transition flex-shrink-0">
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function getToneFromType(type) {
+  if (!type) return 'info'
+  if (type.includes('approved') || type.includes('published')) return 'positive'
+  if (type.includes('pending') || type.includes('claimed') || type.includes('rejected')) return 'warning'
+  return 'info'
 }
 
 function NotificationItem({ n, onClick }) {
