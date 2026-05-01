@@ -901,8 +901,10 @@ function NextShiftCard({ shift }) {
 function DayRow({ day, shifts, leave, onShiftClick }) {
   const today = isToday(day)
   const isPast = !today && day < new Date(new Date().setHours(0, 0, 0, 0))
-  const dayLabel = formatDayShort(day)
-  const dayNumber = day.getDate()
+  // formatDayHeader ritorna "Lun 27", quindi splitto per separare nome e numero
+  const headerText = formatDayHeader(day)
+  const [dayLabel, dayNumberStr] = headerText.split(' ')
+  const dayNumber = dayNumberStr || day.getDate()
 
   return (
     <div className={`bg-white rounded-2xl border ${
@@ -916,7 +918,7 @@ function DayRow({ day, shifts, leave, onShiftClick }) {
           <div className={`font-sans text-xs uppercase tracking-wider font-semibold ${
             today ? 'text-terracotta-700' : 'text-warm-brown'
           }`}>
-            {dayLabel.split(' ')[0]}
+            {dayLabel}
           </div>
           <div className={`font-serif text-2xl font-semibold mt-0.5 tabular-nums ${
             today ? 'text-terracotta-700' : 'text-warm-dark'
