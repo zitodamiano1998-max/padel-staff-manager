@@ -3,7 +3,7 @@ import { useAuth } from '../lib/AuthContext'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
-  Settings as SettingsIcon,
+  Settings as SettingsIcon, CalendarPlus,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import InstallPrompt from './InstallPrompt'
@@ -59,6 +59,11 @@ export default function Layout({ children }) {
             <NavLink to="/timesheets" icon={<ListChecks size={16} />} active={isActive('/timesheets')}>
               {profile?.is_manager ? 'Timbrature' : 'Mie ore'}
             </NavLink>
+            {!profile?.is_manager && (
+              <NavLink to="/my-calendar" icon={<CalendarPlus size={16} />} active={isActive('/my-calendar')}>
+                Calendario
+              </NavLink>
+            )}
             {profile?.is_manager && (
               <>
                 <NavLink to="/staff" icon={<Users size={16} />} active={isActive('/staff')}>
