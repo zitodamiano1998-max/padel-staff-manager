@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
-  Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
+  Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight, Settings as SettingsIcon,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import InstallPrompt from './InstallPrompt'
@@ -55,13 +55,16 @@ export default function Layout({ children }) {
             <NavLink to="/swaps" icon={<ArrowLeftRight size={16} />} active={isActive('/swaps')}>
               Scambi
             </NavLink>
+            <NavLink to="/timesheets" icon={<ListChecks size={16} />} active={isActive('/timesheets')}>
+              {profile?.is_manager ? 'Timbrature' : 'Mie ore'}
+            </NavLink>
             {profile?.is_manager && (
               <>
-                <NavLink to="/timesheets" icon={<ListChecks size={16} />} active={isActive('/timesheets')}>
-                  Timbrature
-                </NavLink>
                 <NavLink to="/staff" icon={<Users size={16} />} active={isActive('/staff')}>
                   Anagrafica
+                </NavLink>
+                <NavLink to="/settings" icon={<SettingsIcon size={16} />} active={isActive('/settings')}>
+                  Impostazioni
                 </NavLink>
               </>
             )}

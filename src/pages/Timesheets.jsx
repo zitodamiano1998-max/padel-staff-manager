@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { startOfMonth, endOfMonth, addDays } from 'date-fns'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
 import {
   startOfWeek, weekDays, formatDateISO, formatDayLong,
 } from '../lib/dateUtils'
@@ -11,15 +12,19 @@ import {
 } from 'lucide-react'
 
 export default function Timesheets() {
-  const [rangeMode, setRangeMode] = useState('week') // 'week' | 'month' | 'custom'
+  const { profile } = useAuth()
+  const isManager = profile?.is_manager
+  const myId = profile?.id
+
+  const [rangeMode, setRangeMode] = useState('week')
   const [customStart, setCustomStart] = useState(formatDateISO(new Date()))
   const [customEnd, setCustomEnd] = useState(formatDateISO(new Date()))
-  const [filterStaffId, setFilterStaffId] = useState('') // '' = tutti
+  const [filterStaffId, setFilterStaffId] = useState('')
 
   const [staff, setStaff] = useState([])
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState(new Set())
+  const [expanded, setExpanded] = useState(isManager ? new Set() : new Set([myId])) // dipendente: già espanso
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState(null)
@@ -51,21 +56,41 @@ export default function Timesheets() {
 
   const fetchData = async () => {
     setLoading(true)
-    const [staffRes, entRes] = await Promise.all([
-      supabase
-        .from('staff_members')
-        .select('id, first_name, last_name, roles(id, name, color)')
-        .eq('is_active', true)
-        .order('first_name'),
-      supabase
-        .from('time_entries')
-        .select('*, staff_members!time_entries_staff_id_fkey(id, first_name, last_name, roles(name, color))')
-        .gte('event_time', range.start.toISOString())
-        .lt('event_time', range.end.toISOString())
-        .order('event_time', { ascending: true }),
-    ])
-    if (!staffRes.error) setStaff(staffRes.data || [])
+    let entriesQuery = supabase
+      .from('time_entries')
+      .select('*, staff_members!time_entries_staff_id_fkey(id, first_name, last_name, roles(name, color))')
+      .gte('event_time', range.start.toISOString())
+      .lt('event_time', range.end.toISOString())
+      .order('event_time', { ascending: true })
+
+    // Dipendente: solo le proprie timbrature
+    if (!isManager && myId) {
+      entriesQuery = entriesQuery.eq('staff_id', myId)
+    }
+
+    const promises = [entriesQuery]
+    if (isManager) {
+      promises.push(
+        supabase
+          .from('staff_members')
+          .select('id, first_name, last_name, roles(id, name, color)')
+          .eq('is_active', true)
+          .order('first_name')
+      )
+    }
+
+    const [entRes, staffRes] = await Promise.all(promises)
     if (!entRes.error) setEntries(entRes.data || [])
+    if (staffRes && !staffRes.error) setStaff(staffRes.data || [])
+    // Dipendente: setto staff con solo se stesso (per il rendering della card)
+    if (!isManager && profile) {
+      setStaff([{
+        id: profile.id,
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        roles: { name: profile.role_name, color: profile.role_color },
+      }])
+    }
     setLoading(false)
   }
 
@@ -165,15 +190,21 @@ export default function Timesheets() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-4xl text-warm-dark mb-1">Timbrature</h1>
+          <h1 className="text-4xl text-warm-dark mb-1">
+            {isManager ? 'Timbrature' : 'Le mie timbrature'}
+          </h1>
           <p className="font-sans text-sm text-warm-brown">
-            Riepilogo ore lavorate dal team. Solo per manager.
+            {isManager
+              ? 'Riepilogo ore lavorate dal team.'
+              : 'Le tue ore lavorate. Per timbrare vai su Timbra.'}
           </p>
         </div>
-        <button onClick={handleNew}
-          className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm flex-shrink-0">
-          <Plus size={16} /> Aggiungi timbratura
-        </button>
+        {isManager && (
+          <button onClick={handleNew}
+            className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm flex-shrink-0">
+            <Plus size={16} /> Aggiungi timbratura
+          </button>
+        )}
       </div>
 
       {/* Filtri */}
@@ -205,23 +236,34 @@ export default function Timesheets() {
           </>
         )}
 
-        <select value={filterStaffId} onChange={(e) => setFilterStaffId(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-cream-300 bg-white font-sans text-sm focus:outline-none focus:border-terracotta-400 transition">
-          <option value="">Tutti i dipendenti</option>
-          {staff.map((s) => (
-            <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>
-          ))}
-        </select>
+        {isManager && (
+          <select value={filterStaffId} onChange={(e) => setFilterStaffId(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-cream-300 bg-white font-sans text-sm focus:outline-none focus:border-terracotta-400 transition">
+            <option value="">Tutti i dipendenti</option>
+            {staff.map((s) => (
+              <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <StatBox label="Ore totali" value={globalStats.totalHours.toFixed(1)} />
-        <StatBox label="Dipendenti attivi" value={globalStats.activeStaff} />
-        <StatBox label="Eventi fuori area"
-          value={globalStats.outsideCount}
-          accent={globalStats.outsideCount > 0 ? 'red' : null} />
-      </div>
+      {isManager ? (
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <StatBox label="Ore totali" value={globalStats.totalHours.toFixed(1)} />
+          <StatBox label="Dipendenti attivi" value={globalStats.activeStaff} />
+          <StatBox label="Eventi fuori area"
+            value={globalStats.outsideCount}
+            accent={globalStats.outsideCount > 0 ? 'red' : null} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <StatBox label="Ore lavorate" value={globalStats.totalHours.toFixed(1)} />
+          <StatBox label="Eventi fuori area"
+            value={globalStats.outsideCount}
+            accent={globalStats.outsideCount > 0 ? 'red' : null} />
+        </div>
+      )}
 
       {/* Lista dipendenti */}
       {loading ? (
@@ -240,6 +282,8 @@ export default function Timesheets() {
               summary={sum}
               expanded={expanded.has(sum.staff.id)}
               onToggle={() => toggleExpand(sum.staff.id)}
+              canEdit={isManager}
+              hideHeader={!isManager}
               onEdit={handleEdit}
               onDelete={handleDelete} />
           ))}
@@ -288,7 +332,7 @@ function StatBox({ label, value, accent }) {
   )
 }
 
-function StaffCard({ summary, expanded, onToggle, onEdit, onDelete }) {
+function StaffCard({ summary, expanded, onToggle, onEdit, onDelete, canEdit = true, hideHeader = false }) {
   const { staff, entries, totalHours, daysWorked, outsideCount } = summary
   const color = staff.roles?.color || '#C97D60'
   const h = Math.floor(totalHours)
@@ -304,6 +348,29 @@ function StaffCard({ summary, expanded, onToggle, onEdit, onDelete }) {
     })
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   }, [entries])
+
+  // Se hideHeader (dipendente), mostra direttamente la lista giorni
+  if (hideHeader) {
+    return (
+      <div className="bg-white rounded-2xl border border-cream-300 overflow-hidden">
+        {byDay.length === 0 ? (
+          <div className="p-10 text-center">
+            <ClockIcon size={28} className="mx-auto mb-2 text-warm-brown/40" />
+            <p className="font-sans text-sm text-warm-brown">
+              Nessuna timbratura nel periodo selezionato.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-cream-50/30">
+            {byDay.map(([day, dayEntries]) => (
+              <DayBlock key={day} day={day} entries={dayEntries}
+                onEdit={onEdit} onDelete={onDelete} canEdit={canEdit} />
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-cream-300 overflow-hidden">
@@ -357,7 +424,7 @@ function StaffCard({ summary, expanded, onToggle, onEdit, onDelete }) {
           ) : (
             byDay.map(([day, dayEntries]) => (
               <DayBlock key={day} day={day} entries={dayEntries}
-                onEdit={onEdit} onDelete={onDelete} />
+                onEdit={onEdit} onDelete={onDelete} canEdit={canEdit} />
             ))
           )}
         </div>
@@ -366,7 +433,7 @@ function StaffCard({ summary, expanded, onToggle, onEdit, onDelete }) {
   )
 }
 
-function DayBlock({ day, entries, onEdit, onDelete }) {
+function DayBlock({ day, entries, onEdit, onDelete, canEdit = true }) {
   const date = new Date(day + 'T12:00:00')
   const dayHours = computeWorkedMs(entries, new Date()) / 3600000
   const h = Math.floor(dayHours)
@@ -383,14 +450,14 @@ function DayBlock({ day, entries, onEdit, onDelete }) {
       </div>
       <div className="divide-y divide-cream-100">
         {entries.map((e) => (
-          <EntryRow key={e.id} entry={e} onEdit={onEdit} onDelete={onDelete} />
+          <EntryRow key={e.id} entry={e} onEdit={onEdit} onDelete={onDelete} canEdit={canEdit} />
         ))}
       </div>
     </div>
   )
 }
 
-function EntryRow({ entry, onEdit, onDelete }) {
+function EntryRow({ entry, onEdit, onDelete, canEdit = true }) {
   const t = new Date(entry.event_time)
   const cfg = EVENT_CONFIG[entry.event_type] || EVENT_CONFIG.clock_in
   const distance = entry.distance_from_center !== null
@@ -428,16 +495,20 @@ function EntryRow({ entry, onEdit, onDelete }) {
           {entry.notes && <span className="ml-2 italic">"{entry.notes}"</span>}
         </div>
       </div>
-      <button onClick={(e) => { e.stopPropagation(); onEdit(entry) }}
-        className="p-2 rounded-lg hover:bg-cream-200 text-warm-brown hover:text-warm-dark transition"
-        title="Modifica">
-        <Edit size={14} />
-      </button>
-      <button onClick={(e) => { e.stopPropagation(); onDelete(entry) }}
-        className="p-2 rounded-lg hover:bg-terracotta-50 text-terracotta-700 transition"
-        title="Elimina">
-        <Trash2 size={14} />
-      </button>
+      {canEdit && (
+        <>
+          <button onClick={(e) => { e.stopPropagation(); onEdit(entry) }}
+            className="p-2 rounded-lg hover:bg-cream-200 text-warm-brown hover:text-warm-dark transition"
+            title="Modifica">
+            <Edit size={14} />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(entry) }}
+            className="p-2 rounded-lg hover:bg-terracotta-50 text-terracotta-700 transition"
+            title="Elimina">
+            <Trash2 size={14} />
+          </button>
+        </>
+      )}
     </div>
   )
 }
