@@ -2,7 +2,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
-  Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight, Settings as SettingsIcon,
+  Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
+  Settings as SettingsIcon,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import InstallPrompt from './InstallPrompt'

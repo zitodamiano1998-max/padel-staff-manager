@@ -1,12 +1,20 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import {
-  Building2, Clock as ClockIcon, Users as UsersIcon,
-  MapPin, Save, Plus, Trash2, GripVertical, AlertCircle, Check,
+  Settings as SettingsIcon, MapPin, Clock as ClockIcon, Users,
+  Save, Plus, Trash2, Edit, X,
 } from 'lucide-react'
 
+const ROLE_CATEGORIES = [
+  { value: 'reception', label: 'Reception' },
+  { value: 'instructor', label: 'Istruttore' },
+  { value: 'bar', label: 'Bar' },
+  { value: 'maintenance', label: 'Manutenzione' },
+  { value: 'manager', label: 'Manager' },
+]
+
 export default function Settings() {
-  const [tab, setTab] = useState('center') // center | rules | roles
+  const [tab, setTab] = useState('center')
   const [toast, setToast] = useState(null)
 
   const showToast = (msg, kind = 'success') => {
@@ -16,33 +24,33 @@ export default function Settings() {
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-4xl text-warm-dark mb-1">Impostazioni</h1>
         <p className="font-sans text-sm text-warm-brown">
-          Configurazione del centro, regole turni, gestione ruoli.
+          Configurazione del centro, regole di lavoro e ruoli del team.
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        <TabButton active={tab === 'center'} onClick={() => setTab('center')} icon={<Building2 size={16} />}>
-          Centro
-        </TabButton>
-        <TabButton active={tab === 'rules'} onClick={() => setTab('rules')} icon={<ClockIcon size={16} />}>
-          Regole turni
-        </TabButton>
-        <TabButton active={tab === 'roles'} onClick={() => setTab('roles')} icon={<UsersIcon size={16} />}>
-          Ruoli
-        </TabButton>
+      <div className="flex gap-1 bg-cream-200 rounded-xl p-1 mb-6 max-w-fit">
+        {[
+          { v: 'center', label: 'Centro', Icon: MapPin },
+          { v: 'hours', label: 'Orari & turni', Icon: ClockIcon },
+          { v: 'roles', label: 'Ruoli', Icon: Users },
+        ].map((opt) => (
+          <button key={opt.v} onClick={() => setTab(opt.v)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-sans text-sm font-semibold transition ${
+              tab === opt.v ? 'bg-white text-warm-dark shadow-sm' : 'text-warm-brown hover:text-warm-dark'
+            }`}>
+            <opt.Icon size={14} />
+            {opt.label}
+          </button>
+        ))}
       </div>
 
-      {/* Tab content */}
-      {tab === 'center' && <CenterSettings showToast={showToast} />}
-      {tab === 'rules' && <RulesSettings showToast={showToast} />}
-      {tab === 'roles' && <RolesSettings showToast={showToast} />}
+      {tab === 'center' && <CenterSection onToast={showToast} />}
+      {tab === 'hours' && <HoursSection onToast={showToast} />}
+      {tab === 'roles' && <RolesSection onToast={showToast} />}
 
-      {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-lg font-sans text-sm z-50 ${
           toast.kind === 'error' ? 'bg-terracotta-600 text-white' : 'bg-sage-500 text-white'
@@ -54,27 +62,11 @@ export default function Settings() {
   )
 }
 
-function TabButton({ active, onClick, icon, children }) {
-  return (
-    <button onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-sans font-semibold text-sm transition border ${
-        active
-          ? 'bg-terracotta-400 text-white border-terracotta-400 shadow-sm'
-          : 'bg-white text-warm-brown border-cream-300 hover:border-terracotta-300'
-      }`}>
-      {icon}
-      {children}
-    </button>
-  )
-}
-
 // ============================================================================
-// TAB 1 — CENTRO (nome, coordinate, geofence)
+// SEZIONE CENTRO
 // ============================================================================
-function CenterSettings({ showToast }) {
+function CenterSection({ onToast }) {
   const [settings, setSettings] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     center_name: '',
     center_latitude: '',
@@ -82,6 +74,8 @@ function CenterSettings({ showToast }) {
     geofence_radius_meters: 150,
     timezone: 'Europe/Rome',
   })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { fetchSettings() }, [])
 
@@ -92,8 +86,8 @@ function CenterSettings({ showToast }) {
       setSettings(data)
       setForm({
         center_name: data.center_name || '',
-        center_latitude: data.center_latitude || '',
-        center_longitude: data.center_longitude || '',
+        center_latitude: data.center_latitude ?? '',
+        center_longitude: data.center_longitude ?? '',
         geofence_radius_meters: data.geofence_radius_meters || 150,
         timezone: data.timezone || 'Europe/Rome',
       })
@@ -107,109 +101,67 @@ function CenterSettings({ showToast }) {
     const { error } = await supabase
       .from('settings')
       .update({
-        center_name: form.center_name.trim() || null,
-        center_latitude: parseFloat(form.center_latitude) || null,
-        center_longitude: parseFloat(form.center_longitude) || null,
-        geofence_radius_meters: parseInt(form.geofence_radius_meters) || 150,
-        timezone: form.timezone || 'Europe/Rome',
+        center_name: form.center_name.trim(),
+        center_latitude: parseFloat(form.center_latitude),
+        center_longitude: parseFloat(form.center_longitude),
+        geofence_radius_meters: parseInt(form.geofence_radius_meters),
+        timezone: form.timezone.trim(),
         updated_at: new Date().toISOString(),
       })
       .eq('id', settings.id)
     setSaving(false)
-    if (error) showToast('Errore: ' + error.message, 'error')
-    else showToast('Impostazioni centro salvate')
+    if (error) onToast('Errore: ' + error.message, 'error')
+    else { onToast('Impostazioni salvate'); fetchSettings() }
   }
 
-  const useCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      showToast('Geolocalizzazione non supportata', 'error')
-      return
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setForm({
-          ...form,
-          center_latitude: pos.coords.latitude.toFixed(7),
-          center_longitude: pos.coords.longitude.toFixed(7),
-        })
-        showToast(`Posizione acquisita (precisione ${Math.round(pos.coords.accuracy)}m)`)
-      },
-      (err) => showToast('Errore GPS: ' + err.message, 'error'),
-      { enableHighAccuracy: true, timeout: 15000 }
-    )
-  }
-
-  if (loading) {
-    return <div className="text-center py-12 text-warm-brown font-sans">Caricamento...</div>
-  }
+  if (loading) return <div className="text-center py-12 text-warm-brown font-sans">Caricamento…</div>
 
   return (
-    <div className="bg-white rounded-2xl border border-cream-300 p-6 max-w-2xl">
-      <div className="space-y-4">
-        <Field label="Nome del centro">
-          <input type="text" value={form.center_name}
-            onChange={(e) => setForm({ ...form, center_name: e.target.value })}
-            placeholder="es. Centro Padel San Miniato"
-            className={inputCls} />
+    <div className="bg-white rounded-2xl border border-cream-300 p-6 space-y-5">
+      <SectionHeader Icon={MapPin} title="Dati del centro"
+        subtitle="Posizione e configurazione del geofence per le timbrature" />
+
+      <Field label="Nome centro" required>
+        <input type="text" value={form.center_name}
+          onChange={(e) => setForm({ ...form, center_name: e.target.value })}
+          className={inputCls} />
+      </Field>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Latitudine" required hint="es. 43.6881172">
+          <input type="number" step="0.0000001" value={form.center_latitude}
+            onChange={(e) => setForm({ ...form, center_latitude: e.target.value })}
+            className={inputCls + ' tabular-nums'} />
         </Field>
-
-        <div className="border-t border-cream-200 pt-4">
-          <div className="font-sans text-sm font-semibold text-warm-dark mb-2 flex items-center gap-2">
-            <MapPin size={14} className="text-terracotta-500" />
-            Posizione GPS del centro
-          </div>
-          <p className="font-sans text-xs text-warm-brown mb-3">
-            Le coordinate vengono usate per validare le timbrature dei dipendenti.
-            Solo chi è entro il raggio impostato può timbrare.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Latitudine">
-              <input type="number" step="0.0000001" value={form.center_latitude}
-                onChange={(e) => setForm({ ...form, center_latitude: e.target.value })}
-                placeholder="43.6881172"
-                className={inputCls + ' tabular-nums'} />
-            </Field>
-            <Field label="Longitudine">
-              <input type="number" step="0.0000001" value={form.center_longitude}
-                onChange={(e) => setForm({ ...form, center_longitude: e.target.value })}
-                placeholder="10.8549639"
-                className={inputCls + ' tabular-nums'} />
-            </Field>
-          </div>
-
-          <button type="button" onClick={useCurrentLocation}
-            className="mt-2 flex items-center gap-2 text-terracotta-600 hover:text-terracotta-700 font-sans font-semibold text-sm">
-            <MapPin size={14} /> Usa la mia posizione attuale
-          </button>
-        </div>
-
-        <Field label="Raggio geofence (metri)" hint="Distanza massima dal centro entro cui i dipendenti possono timbrare. Consigliato: 100-200m.">
-          <div className="flex items-center gap-3">
-            <input type="number" min="50" max="500" step="10" value={form.geofence_radius_meters}
-              onChange={(e) => setForm({ ...form, geofence_radius_meters: e.target.value })}
-              className={inputCls + ' max-w-[140px] tabular-nums'} />
-            <span className="font-sans text-sm text-warm-brown">metri</span>
-          </div>
-        </Field>
-
-        <Field label="Fuso orario" hint="Usato per visualizzare correttamente date e orari.">
-          <select value={form.timezone}
-            onChange={(e) => setForm({ ...form, timezone: e.target.value })}
-            className={inputCls}>
-            <option value="Europe/Rome">Europe/Rome (Italia)</option>
-            <option value="Europe/London">Europe/London (UK)</option>
-            <option value="Europe/Paris">Europe/Paris (Francia)</option>
-            <option value="Europe/Madrid">Europe/Madrid (Spagna)</option>
-            <option value="Europe/Berlin">Europe/Berlin (Germania)</option>
-          </select>
+        <Field label="Longitudine" required hint="es. 10.8549639">
+          <input type="number" step="0.0000001" value={form.center_longitude}
+            onChange={(e) => setForm({ ...form, center_longitude: e.target.value })}
+            className={inputCls + ' tabular-nums'} />
         </Field>
       </div>
 
-      <div className="border-t border-cream-200 mt-6 pt-4 flex justify-end">
+      <div className="bg-cream-50 border border-cream-200 rounded-xl p-3 font-sans text-xs text-warm-brown">
+        💡 Per ottenere coordinate esatte: vai su Google Maps, click destro sul centro, click sulle coordinate per copiarle.
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Raggio geofence (metri)" required hint="Distanza massima dal centro per timbrare">
+          <input type="number" min="10" max="10000" value={form.geofence_radius_meters}
+            onChange={(e) => setForm({ ...form, geofence_radius_meters: e.target.value })}
+            className={inputCls + ' tabular-nums'} />
+        </Field>
+        <Field label="Timezone" hint="es. Europe/Rome">
+          <input type="text" value={form.timezone}
+            onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+            className={inputCls} />
+        </Field>
+      </div>
+
+      <div className="flex justify-end pt-2">
         <button onClick={handleSave} disabled={saving}
           className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 disabled:bg-terracotta-300 text-white font-sans font-semibold px-5 py-2.5 rounded-xl transition shadow-sm">
-          <Save size={16} /> {saving ? 'Salvataggio...' : 'Salva impostazioni'}
+          <Save size={16} />
+          {saving ? 'Salvataggio…' : 'Salva modifiche'}
         </button>
       </div>
     </div>
@@ -217,17 +169,17 @@ function CenterSettings({ showToast }) {
 }
 
 // ============================================================================
-// TAB 2 — REGOLE TURNI
+// SEZIONE ORARI
 // ============================================================================
-function RulesSettings({ showToast }) {
+function HoursSection({ onToast }) {
   const [settings, setSettings] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     weekly_hours_warning: 48,
     daily_rest_hours: 11,
     overtime_threshold_weekly: 40,
   })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { fetchSettings() }, [])
 
@@ -237,9 +189,9 @@ function RulesSettings({ showToast }) {
     if (!error && data) {
       setSettings(data)
       setForm({
-        weekly_hours_warning: data.weekly_hours_warning || 48,
-        daily_rest_hours: data.daily_rest_hours || 11,
-        overtime_threshold_weekly: data.overtime_threshold_weekly || 40,
+        weekly_hours_warning: data.weekly_hours_warning ?? 48,
+        daily_rest_hours: data.daily_rest_hours ?? 11,
+        overtime_threshold_weekly: data.overtime_threshold_weekly ?? 40,
       })
     }
     setLoading(false)
@@ -251,67 +203,59 @@ function RulesSettings({ showToast }) {
     const { error } = await supabase
       .from('settings')
       .update({
-        weekly_hours_warning: parseInt(form.weekly_hours_warning) || 48,
-        daily_rest_hours: parseInt(form.daily_rest_hours) || 11,
-        overtime_threshold_weekly: parseFloat(form.overtime_threshold_weekly) || 40,
+        weekly_hours_warning: parseInt(form.weekly_hours_warning),
+        daily_rest_hours: parseInt(form.daily_rest_hours),
+        overtime_threshold_weekly: parseFloat(form.overtime_threshold_weekly),
         updated_at: new Date().toISOString(),
       })
       .eq('id', settings.id)
     setSaving(false)
-    if (error) showToast('Errore: ' + error.message, 'error')
-    else showToast('Regole turni salvate')
+    if (error) onToast('Errore: ' + error.message, 'error')
+    else { onToast('Impostazioni salvate'); fetchSettings() }
   }
 
-  if (loading) {
-    return <div className="text-center py-12 text-warm-brown font-sans">Caricamento...</div>
-  }
+  if (loading) return <div className="text-center py-12 text-warm-brown font-sans">Caricamento…</div>
 
   return (
-    <div className="bg-white rounded-2xl border border-cream-300 p-6 max-w-2xl">
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 flex items-start gap-2">
-        <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-        <div className="font-sans text-xs text-amber-800">
-          Queste regole determinano gli alert nel Planning quando crei turni che superano le soglie.
-          Non bloccano la creazione, ma aiutano a rispettare normative e benessere dei dipendenti.
+    <div className="bg-white rounded-2xl border border-cream-300 p-6 space-y-5">
+      <SectionHeader Icon={ClockIcon} title="Regole di lavoro"
+        subtitle="Soglie usate per gli alert sui turni e calcolo straordinari" />
+
+      <Field label="Ore settimanali massime" required
+        hint="Sopra questa soglia il sistema mostra alert nei conflitti del planning">
+        <div className="flex items-center gap-2">
+          <input type="number" min="1" max="168" value={form.weekly_hours_warning}
+            onChange={(e) => setForm({ ...form, weekly_hours_warning: e.target.value })}
+            className={inputCls + ' tabular-nums max-w-32'} />
+          <span className="font-sans text-sm text-warm-brown">ore/settimana</span>
         </div>
-      </div>
+      </Field>
 
-      <div className="space-y-4">
-        <Field label="Soglia ore settimanali"
-          hint="Se la somma settimanale supera queste ore, viene mostrato un avviso. Standard italiano: 48h.">
-          <div className="flex items-center gap-3">
-            <input type="number" min="20" max="80" step="1" value={form.weekly_hours_warning}
-              onChange={(e) => setForm({ ...form, weekly_hours_warning: e.target.value })}
-              className={inputCls + ' max-w-[140px] tabular-nums'} />
-            <span className="font-sans text-sm text-warm-brown">ore/settimana</span>
-          </div>
-        </Field>
+      <Field label="Riposo giornaliero minimo" required
+        hint="Tempo minimo tra fine turno e inizio turno successivo">
+        <div className="flex items-center gap-2">
+          <input type="number" min="0" max="24" value={form.daily_rest_hours}
+            onChange={(e) => setForm({ ...form, daily_rest_hours: e.target.value })}
+            className={inputCls + ' tabular-nums max-w-32'} />
+          <span className="font-sans text-sm text-warm-brown">ore</span>
+        </div>
+      </Field>
 
-        <Field label="Riposo giornaliero minimo"
-          hint="Ore di riposo richieste tra la fine di un turno e l'inizio del successivo. D.lgs. 66/2003: 11h.">
-          <div className="flex items-center gap-3">
-            <input type="number" min="6" max="24" step="1" value={form.daily_rest_hours}
-              onChange={(e) => setForm({ ...form, daily_rest_hours: e.target.value })}
-              className={inputCls + ' max-w-[140px] tabular-nums'} />
-            <span className="font-sans text-sm text-warm-brown">ore</span>
-          </div>
-        </Field>
+      <Field label="Soglia straordinari settimanali"
+        hint="Le ore oltre questa soglia sono considerate straordinario">
+        <div className="flex items-center gap-2">
+          <input type="number" step="0.5" min="0" max="168" value={form.overtime_threshold_weekly}
+            onChange={(e) => setForm({ ...form, overtime_threshold_weekly: e.target.value })}
+            className={inputCls + ' tabular-nums max-w-32'} />
+          <span className="font-sans text-sm text-warm-brown">ore/settimana</span>
+        </div>
+      </Field>
 
-        <Field label="Soglia straordinari"
-          hint="Ore settimanali oltre cui le ore lavorate diventano straordinari (per calcolo costi futuri).">
-          <div className="flex items-center gap-3">
-            <input type="number" min="20" max="60" step="0.5" value={form.overtime_threshold_weekly}
-              onChange={(e) => setForm({ ...form, overtime_threshold_weekly: e.target.value })}
-              className={inputCls + ' max-w-[140px] tabular-nums'} />
-            <span className="font-sans text-sm text-warm-brown">ore/settimana</span>
-          </div>
-        </Field>
-      </div>
-
-      <div className="border-t border-cream-200 mt-6 pt-4 flex justify-end">
+      <div className="flex justify-end pt-2">
         <button onClick={handleSave} disabled={saving}
           className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 disabled:bg-terracotta-300 text-white font-sans font-semibold px-5 py-2.5 rounded-xl transition shadow-sm">
-          <Save size={16} /> {saving ? 'Salvataggio...' : 'Salva regole'}
+          <Save size={16} />
+          {saving ? 'Salvataggio…' : 'Salva modifiche'}
         </button>
       </div>
     </div>
@@ -319,28 +263,12 @@ function RulesSettings({ showToast }) {
 }
 
 // ============================================================================
-// TAB 3 — RUOLI
+// SEZIONE RUOLI
 // ============================================================================
-const ROLE_CATEGORIES = [
-  { value: 'reception', label: 'Reception' },
-  { value: 'instructor', label: 'Istruttore' },
-  { value: 'bar', label: 'Bar' },
-  { value: 'maintenance', label: 'Manutenzione' },
-  { value: 'manager', label: 'Manager' },
-  { value: 'other', label: 'Altro' },
-]
-
-const PRESET_COLORS = [
-  '#C97D60', '#5C8D7E', '#D4A574', '#8B7355', '#3D2914',
-  '#E76F51', '#2A9D8F', '#E9C46A', '#264653', '#B5651D',
-  '#9C6644', '#7B9E89', '#D08C60', '#5D737E', '#4A4E69',
-]
-
-function RolesSettings({ showToast }) {
+function RolesSection({ onToast }) {
   const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
-  const [editingId, setEditingId] = useState(null)
-  const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState(null)
 
   useEffect(() => { fetchRoles() }, [])
 
@@ -348,177 +276,203 @@ function RolesSettings({ showToast }) {
     setLoading(true)
     const { data, error } = await supabase
       .from('roles')
-      .select('*')
-      .order('display_order', { ascending: true })
+      .select('id, name, category, color, hourly_rate_default, display_order')
+      .order('display_order')
     if (!error) setRoles(data || [])
     setLoading(false)
   }
 
-  const handleSave = async (id, patch) => {
-    const { error } = await supabase.from('roles').update(patch).eq('id', id)
-    if (error) showToast('Errore: ' + error.message, 'error')
-    else { showToast('Ruolo aggiornato'); fetchRoles() }
-    setEditingId(null)
-  }
-
   const handleDelete = async (role) => {
-    if (!confirm(`Eliminare il ruolo "${role.name}"? I dipendenti con questo ruolo perderanno l'assegnazione.`)) return
+    if (!confirm(`Eliminare il ruolo "${role.name}"? I dipendenti con questo ruolo dovranno essere riassegnati prima.`)) return
     const { error } = await supabase.from('roles').delete().eq('id', role.id)
-    if (error) showToast('Errore: ' + (error.message || 'impossibile eliminare'), 'error')
-    else { showToast('Ruolo eliminato'); fetchRoles() }
+    if (error) onToast('Errore: ' + error.message, 'error')
+    else { onToast('Ruolo eliminato'); fetchRoles() }
   }
 
-  const handleAdd = async (data) => {
-    const maxOrder = Math.max(0, ...roles.map((r) => r.display_order || 0))
-    const { error } = await supabase.from('roles').insert({
-      ...data,
-      display_order: maxOrder + 1,
-    })
-    if (error) showToast('Errore: ' + error.message, 'error')
-    else { showToast('Ruolo aggiunto'); fetchRoles() }
-    setAdding(false)
-  }
-
-  if (loading) {
-    return <div className="text-center py-12 text-warm-brown font-sans">Caricamento...</div>
-  }
+  if (loading) return <div className="text-center py-12 text-warm-brown font-sans">Caricamento…</div>
 
   return (
-    <div className="max-w-3xl">
-      <div className="bg-white rounded-2xl border border-cream-300 overflow-hidden mb-4">
-        {roles.length === 0 ? (
-          <div className="p-8 text-center font-sans text-sm text-warm-brown">
-            Nessun ruolo configurato.
-          </div>
-        ) : (
-          roles.map((role) => (
-            <RoleRow key={role.id} role={role}
-              isEditing={editingId === role.id}
-              onEdit={() => setEditingId(role.id)}
-              onCancel={() => setEditingId(null)}
-              onSave={(patch) => handleSave(role.id, patch)}
-              onDelete={() => handleDelete(role)} />
-          ))
-        )}
+    <>
+      <div className="bg-white rounded-2xl border border-cream-300 p-6">
+        <div className="flex items-start justify-between mb-5 gap-3">
+          <SectionHeader Icon={Users} title="Ruoli del team"
+            subtitle="Categorie usate per assegnare i dipendenti e colorare i turni nel planning" />
+          <button onClick={() => setEditing('new')}
+            className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm flex-shrink-0">
+            <Plus size={14} /> Nuovo
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {roles.map((r) => (
+            <RoleRow key={r.id} role={r}
+              onEdit={() => setEditing(r)}
+              onDelete={() => handleDelete(r)} />
+          ))}
+        </div>
       </div>
 
-      {adding ? (
-        <RoleForm onSave={handleAdd} onCancel={() => setAdding(false)} />
-      ) : (
-        <button onClick={() => setAdding(true)}
-          className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm">
-          <Plus size={16} /> Aggiungi ruolo
-        </button>
+      {editing && (
+        <RoleEditModal
+          role={editing === 'new' ? null : editing}
+          existingOrders={roles.map((r) => r.display_order)}
+          onClose={() => setEditing(null)}
+          onSaved={(msg) => { setEditing(null); fetchRoles(); onToast(msg) }} />
       )}
-    </div>
+    </>
   )
 }
 
-function RoleRow({ role, isEditing, onEdit, onCancel, onSave, onDelete }) {
-  if (isEditing) {
-    return <RoleForm role={role} onSave={onSave} onCancel={onCancel} inline />
-  }
+function RoleRow({ role, onEdit, onDelete }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b border-cream-200 last:border-b-0 hover:bg-cream-50/50 transition">
-      <GripVertical size={16} className="text-warm-brown/30 flex-shrink-0" />
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-        style={{ backgroundColor: role.color }}>
-        <span className="text-white font-serif font-semibold text-sm">{role.name?.[0]?.toUpperCase()}</span>
-      </div>
+    <div className="flex items-center gap-3 p-3 rounded-xl border border-cream-200 hover:border-cream-300 transition">
+      <div className="w-1.5 self-stretch rounded-full" style={{ backgroundColor: role.color }} />
       <div className="flex-1 min-w-0">
-        <div className="font-sans font-semibold text-warm-dark text-sm">{role.name}</div>
-        <div className="font-sans text-xs text-warm-brown">
-          {ROLE_CATEGORIES.find((c) => c.value === role.category)?.label || role.category}
-          {role.hourly_rate_default && ` · €${role.hourly_rate_default}/h base`}
+        <div className="font-sans font-semibold text-warm-dark">{role.name}</div>
+        <div className="font-sans text-xs text-warm-brown flex flex-wrap items-center gap-x-2 mt-0.5">
+          <span>{ROLE_CATEGORIES.find((c) => c.value === role.category)?.label || role.category}</span>
+          <span>·</span>
+          <span className="tabular-nums">{role.color}</span>
+          {role.hourly_rate_default && (
+            <>
+              <span>·</span>
+              <span>€{role.hourly_rate_default}/h</span>
+            </>
+          )}
         </div>
       </div>
       <button onClick={onEdit}
-        className="px-3 py-1.5 rounded-lg font-sans text-xs font-semibold text-warm-dark hover:bg-cream-200 transition">
-        Modifica
+        className="p-2 rounded-lg hover:bg-cream-200 text-warm-brown hover:text-warm-dark transition"
+        title="Modifica">
+        <Edit size={14} />
       </button>
       <button onClick={onDelete}
         className="p-2 rounded-lg hover:bg-terracotta-50 text-terracotta-700 transition"
-        title="Elimina ruolo">
+        title="Elimina">
         <Trash2 size={14} />
       </button>
     </div>
   )
 }
 
-function RoleForm({ role, onSave, onCancel, inline = false }) {
-  const [form, setForm] = useState({
-    name: role?.name || '',
-    category: role?.category || 'other',
-    color: role?.color || PRESET_COLORS[0],
-    hourly_rate_default: role?.hourly_rate_default || '',
+function RoleEditModal({ role, existingOrders, onClose, onSaved }) {
+  const isEdit = !!role
+  const [form, setForm] = useState(() => {
+    if (role) {
+      return {
+        name: role.name || '',
+        category: role.category || 'reception',
+        color: role.color || '#C97D60',
+        hourly_rate_default: role.hourly_rate_default || '',
+        display_order: role.display_order || 0,
+      }
+    }
+    const maxOrder = existingOrders.length > 0 ? Math.max(...existingOrders) : 0
+    return {
+      name: '',
+      category: 'reception',
+      color: '#C97D60',
+      hourly_rate_default: '',
+      display_order: maxOrder + 1,
+    }
   })
-  const [saving, setSaving] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState(null)
 
-  const handleSubmit = async () => {
-    if (!form.name.trim()) return
-    setSaving(true)
-    await onSave({
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setSubmitting(true)
+    const payload = {
       name: form.name.trim(),
       category: form.category,
       color: form.color,
       hourly_rate_default: form.hourly_rate_default ? parseFloat(form.hourly_rate_default) : null,
-    })
-    setSaving(false)
+      display_order: parseInt(form.display_order),
+    }
+    const { error } = isEdit
+      ? await supabase.from('roles').update(payload).eq('id', role.id)
+      : await supabase.from('roles').insert(payload)
+    setSubmitting(false)
+    if (error) setError(error.message)
+    else onSaved(isEdit ? 'Ruolo modificato' : 'Ruolo creato')
   }
 
   return (
-    <div className={`bg-cream-50 ${inline ? 'border-b border-cream-200' : 'rounded-2xl border border-cream-300'} p-4`}>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <Field label="Nome">
-          <input type="text" value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="es. Reception"
-            className={inputCls} autoFocus />
-        </Field>
-        <Field label="Categoria">
-          <select value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
-            className={inputCls}>
-            {ROLE_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        </Field>
-      </div>
+    <div className="fixed inset-0 bg-warm-dark/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <form onSubmit={handleSubmit}
+        className="bg-white rounded-2xl shadow-xl border border-cream-300 max-w-md w-full max-h-[90vh] flex flex-col">
 
-      <Field label="Colore">
-        <div className="flex flex-wrap gap-2">
-          {PRESET_COLORS.map((c) => (
-            <button key={c} type="button"
-              onClick={() => setForm({ ...form, color: c })}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition ${
-                form.color === c ? 'ring-2 ring-warm-dark ring-offset-2' : ''
-              }`}
-              style={{ backgroundColor: c }}
-              title={c}>
-              {form.color === c && <Check size={14} className="text-white" />}
-            </button>
-          ))}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-cream-200 flex-shrink-0">
+          <h2 className="text-2xl text-warm-dark">
+            {isEdit ? 'Modifica ruolo' : 'Nuovo ruolo'}
+          </h2>
+          <button type="button" onClick={onClose}
+            className="p-2 rounded-lg hover:bg-cream-100 text-warm-brown">
+            <X size={18} />
+          </button>
         </div>
-      </Field>
 
-      <Field label="Tariffa oraria base (opzionale, €/h)" hint="Usata in futuro per calcolo costi.">
-        <input type="number" step="0.01" min="0" value={form.hourly_rate_default}
-          onChange={(e) => setForm({ ...form, hourly_rate_default: e.target.value })}
-          placeholder="es. 12.50"
-          className={inputCls + ' max-w-[180px] tabular-nums'} />
-      </Field>
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+          <Field label="Nome" required>
+            <input type="text" required value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className={inputCls} />
+          </Field>
 
-      <div className="flex justify-end gap-2 mt-4">
-        <button onClick={onCancel}
-          className="px-4 py-2 rounded-xl font-sans font-semibold text-sm text-warm-dark hover:bg-cream-200 transition">
-          Annulla
-        </button>
-        <button onClick={handleSubmit} disabled={!form.name.trim() || saving}
-          className="px-4 py-2 rounded-xl bg-terracotta-400 hover:bg-terracotta-500 disabled:bg-terracotta-300 text-white font-sans font-semibold text-sm transition shadow-sm">
-          {saving ? 'Salvataggio...' : 'Salva'}
-        </button>
-      </div>
+          <Field label="Categoria" required>
+            <select required value={form.category}
+              onChange={(e) => setForm({ ...form, category: e.target.value })}
+              className={inputCls}>
+              {ROLE_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Colore" required hint="Usato per identificare il ruolo nel planning">
+            <div className="flex items-center gap-3">
+              <input type="color" value={form.color}
+                onChange={(e) => setForm({ ...form, color: e.target.value })}
+                className="w-14 h-12 rounded-lg border border-cream-300 cursor-pointer" />
+              <input type="text" value={form.color}
+                onChange={(e) => setForm({ ...form, color: e.target.value })}
+                className={inputCls + ' flex-1 tabular-nums uppercase'} />
+            </div>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ordine" hint="Posizione in lista">
+              <input type="number" min="0" value={form.display_order}
+                onChange={(e) => setForm({ ...form, display_order: e.target.value })}
+                className={inputCls + ' tabular-nums'} />
+            </Field>
+            <Field label="Tariffa oraria (€)" hint="Opzionale">
+              <input type="number" step="0.01" min="0" value={form.hourly_rate_default}
+                onChange={(e) => setForm({ ...form, hourly_rate_default: e.target.value })}
+                placeholder="es. 12.50"
+                className={inputCls + ' tabular-nums'} />
+            </Field>
+          </div>
+
+          {error && (
+            <div className="bg-terracotta-50 border border-terracotta-200 text-terracotta-700 rounded-xl px-4 py-3 font-sans text-sm">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-cream-200 flex-shrink-0">
+          <button type="button" onClick={onClose}
+            className="px-5 py-2.5 rounded-xl font-sans font-semibold text-sm text-warm-dark hover:bg-cream-100 transition">
+            Annulla
+          </button>
+          <button type="submit" disabled={submitting}
+            className="px-5 py-2.5 rounded-xl bg-terracotta-400 hover:bg-terracotta-500 disabled:bg-terracotta-300 text-white font-sans font-semibold text-sm transition shadow-sm">
+            {submitting ? 'Salvataggio…' : (isEdit ? 'Salva' : 'Crea')}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -529,15 +483,29 @@ function RoleForm({ role, onSave, onCancel, inline = false }) {
 const inputCls =
   'w-full px-3 py-2.5 rounded-xl border border-cream-300 bg-white font-sans text-sm text-warm-dark focus:outline-none focus:border-terracotta-400 focus:ring-2 focus:ring-terracotta-100 transition'
 
-function Field({ label, hint, children }) {
+function SectionHeader({ Icon, title, subtitle }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="w-10 h-10 rounded-xl bg-terracotta-50 flex items-center justify-center flex-shrink-0">
+        <Icon size={18} className="text-terracotta-600" />
+      </div>
+      <div>
+        <h2 className="text-xl text-warm-dark font-serif">{title}</h2>
+        <p className="font-sans text-xs text-warm-brown">{subtitle}</p>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, required, hint, children }) {
   return (
     <div>
       <label className="block font-sans text-sm font-semibold text-warm-dark mb-1.5">
-        {label}
+        {label} {required && <span className="text-terracotta-500">*</span>}
       </label>
       {children}
       {hint && (
-        <p className="font-sans text-xs text-warm-brown/80 mt-1.5">{hint}</p>
+        <p className="font-sans text-xs text-warm-brown/70 mt-1">{hint}</p>
       )}
     </div>
   )
