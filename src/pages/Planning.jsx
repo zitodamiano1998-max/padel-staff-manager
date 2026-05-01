@@ -275,13 +275,16 @@ export default function Planning() {
 
   if (!isManager) {
     return (
-      <div className="bg-white rounded-2xl border border-cream-300 p-8 text-center">
-        <CalendarIcon size={32} className="mx-auto text-warm-brown mb-3" />
-        <h2 className="text-xl text-warm-dark mb-2">Visualizzazione planning</h2>
-        <p className="font-sans text-sm text-warm-brown">
-          La vista turni per i dipendenti arriverà nel prossimo step.
-        </p>
-      </div>
+      <EmployeePlanningView
+        days={days}
+        weekStart={weekStart}
+        myShifts={shifts.filter((s) => s.staff_id === profile?.id && s.status !== 'cancelled')}
+        approvedLeaves={approvedLeaves.filter((l) => l.staff_id === profile?.id)}
+        loading={loading}
+        onPrev={goPrev}
+        onNext={goNext}
+        onToday={goToday}
+      />
     )
   }
 
@@ -704,6 +707,373 @@ function DailyShiftRow({ shift, onClick }) {
           Bozza
         </span>
       )}
+    </div>
+  )
+}
+
+// ============================================================================
+// VISTA DIPENDENTE — calendario settimanale personale read-only
+// ============================================================================
+function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, loading, onPrev, onNext, onToday }) {
+  const [selectedShift, setSelectedShift] = useState(null)
+
+  // Statistiche settimana
+  const weekStats = useMemo(() => {
+    let totalHours = 0
+    let count = 0
+    myShifts.forEach((s) => {
+      const start = new Date(s.start_at)
+      const end = new Date(s.end_at)
+      // Filtra solo turni della settimana visualizzata
+      if (start >= days[0] && start < new Date(days[6].getTime() + 24 * 60 * 60 * 1000)) {
+        const hours = (end - start) / 3600000 - (s.break_minutes || 0) / 60
+        totalHours += hours
+        count += 1
+      }
+    })
+    return { totalHours, count }
+  }, [myShifts, days])
+
+  // Trova prossimo turno futuro (anche fuori dalla settimana visualizzata)
+  const nextShift = useMemo(() => {
+    const now = new Date()
+    return myShifts
+      .filter((s) => new Date(s.start_at) > now && s.status !== 'cancelled')
+      .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))[0]
+  }, [myShifts])
+
+  // Raggruppa turni per giorno (key: YYYY-MM-DD)
+  const shiftsByDay = useMemo(() => {
+    const map = new Map()
+    myShifts.forEach((s) => {
+      const key = startDateOfShift(s.start_at)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(s)
+    })
+    return map
+  }, [myShifts])
+
+  // Mappa ferie approvate per giorno
+  const leavesByDay = useMemo(() => {
+    const map = new Map()
+    approvedLeaves.forEach((l) => {
+      const start = new Date(l.start_date + 'T00:00:00')
+      const end = new Date(l.end_date + 'T00:00:00')
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        map.set(formatDateISO(d), l)
+      }
+    })
+    return map
+  }, [approvedLeaves])
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-4xl text-warm-dark mb-1">Planning</h1>
+          <p className="text-warm-brown font-sans text-sm capitalize">
+            {formatDayShort(days[0])} → {formatDayShort(days[6])}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button onClick={onPrev}
+            className="p-2 rounded-xl border border-cream-300 hover:bg-cream-100 text-warm-dark transition">
+            <ChevronLeft size={18} />
+          </button>
+          <button onClick={onToday}
+            className="px-3 py-2 rounded-xl border border-cream-300 hover:bg-cream-100 text-warm-dark font-sans text-sm font-semibold transition">
+            Oggi
+          </button>
+          <button onClick={onNext}
+            className="p-2 rounded-xl border border-cream-300 hover:bg-cream-100 text-warm-dark transition">
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* Card "Prossimo turno" */}
+      {nextShift && (
+        <NextShiftCard shift={nextShift} />
+      )}
+
+      {/* Stats settimana */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <StatBox label="Turni questa settimana" value={weekStats.count} />
+        <StatBox label="Ore totali" value={weekStats.totalHours.toFixed(1)} />
+      </div>
+
+      {/* Calendario settimanale */}
+      {loading ? (
+        <div className="text-center py-12 text-warm-brown font-sans">Caricamento…</div>
+      ) : (
+        <div className="space-y-2">
+          {days.map((day) => {
+            const dayKey = formatDateISO(day)
+            const dayShifts = shiftsByDay.get(dayKey) || []
+            const dayLeave = leavesByDay.get(dayKey)
+            return (
+              <DayRow
+                key={dayKey}
+                day={day}
+                shifts={dayShifts}
+                leave={dayLeave}
+                onShiftClick={setSelectedShift}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {/* Modal dettaglio turno */}
+      {selectedShift && (
+        <ShiftDetailModal
+          shift={selectedShift}
+          onClose={() => setSelectedShift(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function NextShiftCard({ shift }) {
+  const start = new Date(shift.start_at)
+  const end = new Date(shift.end_at)
+  const now = new Date()
+  const ms = start - now
+  const hours = ms / 3600000
+  const days = Math.floor(hours / 24)
+  const color = shift.roles?.color || '#C97D60'
+
+  let countdown = ''
+  if (hours < 1) {
+    const mins = Math.floor(ms / 60000)
+    countdown = mins <= 0 ? 'Sta iniziando ora!' : `tra ${mins} minuti`
+  } else if (hours < 24) {
+    countdown = `tra ${Math.floor(hours)}h`
+  } else if (days === 1) {
+    countdown = 'domani'
+  } else if (days < 7) {
+    countdown = `tra ${days} giorni`
+  } else {
+    countdown = formatDayShort(start)
+  }
+
+  const totalHours = ((end - start) / 3600000 - (shift.break_minutes || 0) / 60).toFixed(1)
+
+  return (
+    <div className="bg-white rounded-2xl border-2 border-cream-300 p-5 mb-4 relative overflow-hidden"
+      style={{ borderLeftWidth: 6, borderLeftColor: color }}>
+      <div className="font-sans text-xs uppercase tracking-wider text-warm-brown mb-1">
+        Prossimo turno · {countdown}
+      </div>
+      <div className="font-serif text-2xl text-warm-dark mb-2 capitalize">
+        {formatDayLong(start)}
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="font-sans text-base font-semibold text-warm-dark tabular-nums">
+          {formatTimeFromISO(shift.start_at)} – {formatTimeFromISO(shift.end_at)}
+        </div>
+        <span className="font-sans text-sm text-warm-brown">·</span>
+        <div className="font-sans text-sm text-warm-brown">
+          {totalHours}h
+          {shift.break_minutes > 0 && ` (pausa ${shift.break_minutes}m)`}
+        </div>
+        {shift.roles?.name && (
+          <>
+            <span className="font-sans text-sm text-warm-brown">·</span>
+            <div className="font-sans text-sm text-warm-dark font-semibold">
+              {shift.roles.name}
+            </div>
+          </>
+        )}
+        {shift.status === 'draft' && (
+          <span className="ml-auto font-sans text-xs italic text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+            Bozza
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DayRow({ day, shifts, leave, onShiftClick }) {
+  const today = isToday(day)
+  const isPast = !today && day < new Date(new Date().setHours(0, 0, 0, 0))
+  const dayLabel = formatDayShort(day)
+  const dayNumber = day.getDate()
+
+  return (
+    <div className={`bg-white rounded-2xl border ${
+      today ? 'border-terracotta-300 shadow-sm' : 'border-cream-300'
+    } overflow-hidden ${isPast ? 'opacity-60' : ''}`}>
+      <div className="flex">
+        {/* Sidebar giorno */}
+        <div className={`flex-shrink-0 w-20 py-4 px-3 text-center border-r ${
+          today ? 'bg-terracotta-50 border-terracotta-200' : 'bg-cream-50 border-cream-200'
+        }`}>
+          <div className={`font-sans text-xs uppercase tracking-wider font-semibold ${
+            today ? 'text-terracotta-700' : 'text-warm-brown'
+          }`}>
+            {dayLabel.split(' ')[0]}
+          </div>
+          <div className={`font-serif text-2xl font-semibold mt-0.5 tabular-nums ${
+            today ? 'text-terracotta-700' : 'text-warm-dark'
+          }`}>
+            {dayNumber}
+          </div>
+        </div>
+
+        {/* Contenuto */}
+        <div className="flex-1 p-3 min-w-0">
+          {leave ? (
+            <LeaveBadge leave={leave} />
+          ) : shifts.length === 0 ? (
+            <div className="font-sans text-sm text-warm-brown/60 italic py-2">
+              Riposo
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {shifts.map((s) => (
+                <ShiftBar key={s.id} shift={s} onClick={() => onShiftClick(s)} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ShiftBar({ shift, onClick }) {
+  const color = shift.roles?.color || '#C97D60'
+  const start = new Date(shift.start_at)
+  const end = new Date(shift.end_at)
+  const hours = ((end - start) / 3600000 - (shift.break_minutes || 0) / 60).toFixed(1)
+  const isDraft = shift.status === 'draft'
+
+  return (
+    <button onClick={onClick}
+      className={`w-full text-left rounded-xl px-3 py-2.5 transition hover:shadow-sm flex items-center gap-3 ${
+        isDraft ? 'border-2 border-dashed' : 'border'
+      }`}
+      style={{
+        backgroundColor: isDraft ? 'transparent' : color + '15',
+        borderColor: color + (isDraft ? '99' : '40'),
+      }}>
+      <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+      <div className="flex-1 min-w-0">
+        <div className="font-sans text-sm font-semibold text-warm-dark tabular-nums">
+          {formatTimeFromISO(shift.start_at)} – {formatTimeFromISO(shift.end_at)}
+        </div>
+        <div className="font-sans text-xs text-warm-brown">
+          {hours}h
+          {shift.roles?.name && ` · ${shift.roles.name}`}
+          {shift.break_minutes > 0 && ` · pausa ${shift.break_minutes}m`}
+        </div>
+      </div>
+      {isDraft && (
+        <span className="font-sans text-[10px] uppercase tracking-wider font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md flex-shrink-0">
+          Bozza
+        </span>
+      )}
+    </button>
+  )
+}
+
+function LeaveBadge({ leave }) {
+  const labels = {
+    vacation: 'Ferie',
+    personal: 'Permesso',
+    sick: 'Malattia',
+    unpaid: 'Non retribuita',
+    other: 'Assenza',
+  }
+  return (
+    <div className="flex items-center gap-2 py-2">
+      <span className="font-sans text-sm font-semibold text-sage-700 bg-sage-50 border border-sage-200 px-3 py-1 rounded-lg">
+        🌴 {labels[leave.leave_type] || 'Assenza'}
+        {leave.is_half_day && ` (mezza giornata, ${leave.half_day_period === 'morning' ? 'mattina' : 'pomeriggio'})`}
+      </span>
+    </div>
+  )
+}
+
+function ShiftDetailModal({ shift, onClose }) {
+  const start = new Date(shift.start_at)
+  const end = new Date(shift.end_at)
+  const hours = ((end - start) / 3600000 - (shift.break_minutes || 0) / 60).toFixed(1)
+  const color = shift.roles?.color || '#C97D60'
+
+  return (
+    <div className="fixed inset-0 bg-warm-dark/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl border border-cream-300 max-w-md w-full"
+        onClick={(e) => e.stopPropagation()}
+        style={{ borderTopWidth: 6, borderTopColor: color }}>
+        <div className="px-6 py-4 border-b border-cream-200 flex items-center justify-between">
+          <h2 className="text-2xl text-warm-dark capitalize">
+            {formatDayLong(start)}
+          </h2>
+          <button onClick={onClose}
+            className="p-2 rounded-lg hover:bg-cream-100 text-warm-brown">
+            ✕
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <DetailRow label="Orario">
+            <span className="font-sans text-base font-semibold text-warm-dark tabular-nums">
+              {formatTimeFromISO(shift.start_at)} – {formatTimeFromISO(shift.end_at)}
+            </span>
+          </DetailRow>
+          <DetailRow label="Durata">
+            <span className="font-sans text-sm text-warm-dark">
+              {hours} ore
+              {shift.break_minutes > 0 && (
+                <span className="text-warm-brown"> (pausa {shift.break_minutes} min)</span>
+              )}
+            </span>
+          </DetailRow>
+          {shift.roles?.name && (
+            <DetailRow label="Ruolo">
+              <span className="font-sans text-sm text-warm-dark font-semibold flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                {shift.roles.name}
+              </span>
+            </DetailRow>
+          )}
+          <DetailRow label="Stato">
+            <span className={`font-sans text-xs font-semibold px-2 py-0.5 rounded-md border inline-block ${
+              shift.status === 'draft'
+                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                : 'bg-sage-50 text-sage-700 border-sage-200'
+            }`}>
+              {shift.status === 'draft' ? 'Bozza' : 'Pubblicato'}
+            </span>
+          </DetailRow>
+          {shift.notes && (
+            <DetailRow label="Note">
+              <span className="font-sans text-sm text-warm-dark italic">"{shift.notes}"</span>
+            </DetailRow>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-cream-200 flex justify-end">
+          <button onClick={onClose}
+            className="px-5 py-2.5 rounded-xl bg-terracotta-400 hover:bg-terracotta-500 text-white font-sans font-semibold text-sm transition shadow-sm">
+            Chiudi
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div>
+      <div className="font-sans text-xs uppercase tracking-wider text-warm-brown mb-1">{label}</div>
+      <div>{children}</div>
     </div>
   )
 }
