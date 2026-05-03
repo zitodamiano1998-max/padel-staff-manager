@@ -74,6 +74,7 @@ export function AuthProvider({ children }) {
       signIn,
       signOut,
       resetPassword,
+      refreshProfile: fetchProfile,
     }}>
       {children}
     </AuthContext.Provider>

@@ -35,6 +35,44 @@ function toIcalUtc(date: Date): string {
   )
 }
 
+// Formatta Date come ora locale italiana: 20260524T150000 (no Z)
+// Usa Intl per ottenere i componenti in fuso Europe/Rome
+function toIcalLocalRome(date: Date): string {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Rome',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
+  const parts = fmt.formatToParts(date)
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '00'
+  return `${get('year')}${get('month')}${get('day')}T${get('hour')}${get('minute')}${get('second')}`
+}
+
+// VTIMEZONE block per Europe/Rome (CET/CEST)
+// Standard RFC 5545. Ogni client lo capisce.
+const VTIMEZONE_ROME = `BEGIN:VTIMEZONE
+TZID:Europe/Rome
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+TZNAME:CEST
+DTSTART:19700329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+TZNAME:CET
+DTSTART:19701025T030000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+END:VTIMEZONE`
+
 // Escape per testo iCal: \, ; , \n
 function icalEscape(text: string): string {
   if (!text) return ''
@@ -75,9 +113,13 @@ function buildIcal(staff: any, shifts: any[], settings: any): string {
   lines.push(`X-WR-CALNAME:${icalEscape(calName)}`)
   lines.push(`X-WR-CALDESC:${icalEscape('Calendario turni lavorativi - aggiornato automaticamente')}`)
   lines.push('X-WR-TIMEZONE:Europe/Rome')
-  // Refresh interval suggerito 1 ora
   lines.push('REFRESH-INTERVAL;VALUE=DURATION:PT1H')
   lines.push('X-PUBLISHED-TTL:PT1H')
+
+  // Definizione timezone Europe/Rome (CET/CEST con DST)
+  for (const tzLine of VTIMEZONE_ROME.split('\n')) {
+    lines.push(tzLine)
+  }
 
   for (const shift of shifts) {
     const start = new Date(shift.start_at)
@@ -85,9 +127,16 @@ function buildIcal(staff: any, shifts: any[], settings: any): string {
     const roleName = shift.roles?.name || 'Turno'
     const summary = `${roleName} · Padel`
 
+    // Estraggo HH:MM in fuso Roma riusando toIcalLocalRome (più robusto di Intl.format diretto)
+    // Output di toIcalLocalRome: 20260524T150000 → estraggo posizioni 9-10 e 11-12
+    const startLocalRaw = toIcalLocalRome(start) // es. "20260524T150000"
+    const endLocalRaw = toIcalLocalRome(end)
+    const startLocal = `${startLocalRaw.slice(9, 11)}:${startLocalRaw.slice(11, 13)}`
+    const endLocal = `${endLocalRaw.slice(9, 11)}:${endLocalRaw.slice(11, 13)}`
+
     const descLines: string[] = []
     descLines.push(`Turno: ${roleName}`)
-    descLines.push(`Orario: ${pad2(new Date(start).getHours())}:${pad2(new Date(start).getMinutes())} - ${pad2(new Date(end).getHours())}:${pad2(new Date(end).getMinutes())}`)
+    descLines.push(`Orario: ${startLocal} - ${endLocal}`)
     if (shift.notes) descLines.push(`Note: ${shift.notes}`)
     descLines.push('')
     descLines.push('Generato automaticamente da Padel Staff Manager')
@@ -98,10 +147,13 @@ function buildIcal(staff: any, shifts: any[], settings: any): string {
                  : 'CONFIRMED'
 
     lines.push('BEGIN:VEVENT')
-    lines.push(icalFold(`UID:shift-${shift.id}@padel-staff-manager`))
+    // UID include versione "v2" per forzare Google Calendar a ricreare gli eventi
+    // dopo cambi nel formato della description (workaround per cache aggressiva)
+    lines.push(icalFold(`UID:shift-${shift.id}-v2@padel-staff-manager`))
     lines.push(`DTSTAMP:${now}`)
-    lines.push(`DTSTART:${toIcalUtc(start)}`)
-    lines.push(`DTEND:${toIcalUtc(end)}`)
+    // Uso TZID per orari locali Roma — niente più Z UTC
+    lines.push(`DTSTART;TZID=Europe/Rome:${toIcalLocalRome(start)}`)
+    lines.push(`DTEND;TZID=Europe/Rome:${toIcalLocalRome(end)}`)
     lines.push(icalFold(`SUMMARY:${icalEscape(summary)}`))
     lines.push(icalFold(`DESCRIPTION:${icalEscape(description)}`))
     if (settings?.center_name) {
@@ -109,8 +161,7 @@ function buildIcal(staff: any, shifts: any[], settings: any): string {
     }
     lines.push(`STATUS:${status}`)
     lines.push('TRANSP:OPAQUE')
-    // SEQUENCE incrementa quando turno modificato. Senza updated_at uso un
-    // hash di start_at + end_at + status: se uno di questi cambia, sequence cambia.
+    // SEQUENCE: hash su (start, end, status) — cambia se uno di questi cambia
     const seqInput = `${shift.start_at}|${shift.end_at}|${shift.status}`
     let seqHash = 0
     for (let i = 0; i < seqInput.length; i++) {

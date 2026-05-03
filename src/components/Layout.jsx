@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
+import { supabase } from '../lib/supabase'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
@@ -7,11 +9,39 @@ import {
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import InstallPrompt from './InstallPrompt'
+import OnboardingWizard from './OnboardingWizard'
 
 export default function Layout({ children }) {
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+
+  const [onboardingDone, setOnboardingDone] = useState(null) // null = loading, true/false = checked
+
+  // Verifico stato onboarding al primo render (solo per dipendenti non-manager)
+  useEffect(() => {
+    if (!profile?.id) return
+    if (profile.is_manager) {
+      // Manager non vede mai l'onboarding (Dario, ecc.)
+      setOnboardingDone(true)
+      return
+    }
+    checkOnboarding()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id])
+
+  const checkOnboarding = async () => {
+    const { data, error } = await supabase
+      .from('staff_members')
+      .select('onboarding_completed_at')
+      .eq('id', profile.id)
+      .single()
+    if (error || !data) {
+      setOnboardingDone(true) // fallback per non bloccare l'app
+      return
+    }
+    setOnboardingDone(!!data.onboarding_completed_at)
+  }
 
   const handleLogout = async () => {
     await signOut()
@@ -19,6 +49,11 @@ export default function Layout({ children }) {
   }
 
   const isActive = (path) => location.pathname === path
+
+  // Se onboarding non ancora fatto, mostra il wizard a tutto schermo
+  if (onboardingDone === false) {
+    return <OnboardingWizard onComplete={() => setOnboardingDone(true)} />
+  }
 
   return (
     <div className="min-h-screen bg-cream-100">
