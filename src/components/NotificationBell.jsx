@@ -349,6 +349,7 @@ const ICONS = {
   // Turni
   shift_assigned: { El: Calendar, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
   shift_published: { El: Calendar, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  shifts_batch_published: { El: Calendar, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
   shift_updated: { El: Calendar, bg: 'bg-amber-100', fg: 'text-amber-700' },
   shift_cancelled: { El: X, bg: 'bg-red-100', fg: 'text-red-700' },
   shift_reminder: { El: ClockIcon, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },

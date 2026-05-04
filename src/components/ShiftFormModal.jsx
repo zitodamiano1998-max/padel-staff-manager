@@ -9,7 +9,7 @@ import { findShiftConflicts, hasBlockingConflicts } from '../lib/conflictUtils'
 import { addDays } from 'date-fns'
 import { X, Trash2, Moon, BookCopy, AlertTriangle } from 'lucide-react'
 
-export default function ShiftFormModal({ shift, preset, staff, roles, templates = [], allShifts = [], availability = [], approvedLeaves = [], onClose, onSaved, onError }) {
+export default function ShiftFormModal({ shift, preset, staff, roles, templates = [], allShifts = [], availability = [], approvedLeaves = [], onClose, onSaved, onError, editMode = false }) {
   const { profile } = useAuth()
   const isEdit = !!shift
 
@@ -138,9 +138,19 @@ export default function ShiftFormModal({ shift, preset, staff, roles, templates 
         status: form.status,
       }
       if (isEdit) {
-        const { error } = await supabase.from('shifts').update(payload).eq('id', shift.id)
+        let error
+        if (editMode) {
+          const { error: e } = await supabase.rpc('update_shift_silent', {
+            p_shift_id: shift.id,
+            p_fields: payload,
+          })
+          error = e
+        } else {
+          const { error: e } = await supabase.from('shifts').update(payload).eq('id', shift.id)
+          error = e
+        }
         if (error) throw error
-        onSaved('Turno aggiornato')
+        onSaved(editMode ? 'Turno aggiornato (silenzioso)' : 'Turno aggiornato')
       } else {
         payload.created_by = profile?.id
         if (form.status === 'published') payload.published_at = new Date().toISOString()

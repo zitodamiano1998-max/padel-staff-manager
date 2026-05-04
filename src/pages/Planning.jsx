@@ -11,6 +11,7 @@ import ShiftFormModal from '../components/ShiftFormModal'
 import TemplatesModal from '../components/TemplatesModal'
 import {
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Grid3x3, BookCopy, AlertTriangle,
+  Send, Pencil, Eye,
 } from 'lucide-react'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -39,6 +40,11 @@ export default function Planning() {
   const [presetCell, setPresetCell] = useState(null)
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
+
+  // Modalità batch publish
+  const [editMode, setEditMode] = useState(false)  // true = silenzia push su modifiche
+  const [publishConfirmOpen, setPublishConfirmOpen] = useState(false)
+  const [publishing, setPublishing] = useState(false)
 
   // Drag & drop
   const [activeShift, setActiveShift] = useState(null) // shift attualmente trascinato
@@ -216,21 +222,35 @@ export default function Planning() {
       )
     )
 
-    const { error } = await supabase
-      .from('shifts')
-      .update({
-        staff_id: newStaffId,
-        start_at: newStartAt.toISOString(),
-        end_at: newEndAt.toISOString(),
+    let error
+    if (editMode) {
+      const { error: e } = await supabase.rpc('update_shift_silent', {
+        p_shift_id: shift.id,
+        p_fields: {
+          staff_id: newStaffId,
+          start_at: newStartAt.toISOString(),
+          end_at: newEndAt.toISOString(),
+        },
       })
-      .eq('id', shift.id)
+      error = e
+    } else {
+      const { error: e } = await supabase
+        .from('shifts')
+        .update({
+          staff_id: newStaffId,
+          start_at: newStartAt.toISOString(),
+          end_at: newEndAt.toISOString(),
+        })
+        .eq('id', shift.id)
+      error = e
+    }
 
     if (error) {
       // Rollback in caso di errore
       setShifts(oldShifts)
       showToast('Errore: ' + error.message, 'error')
     } else {
-      showToast('Turno spostato')
+      showToast(editMode ? 'Turno spostato (silenzioso)' : 'Turno spostato')
     }
   }
 
@@ -268,6 +288,44 @@ export default function Planning() {
       setSelectedDay(next)
       const nextWeek = startOfWeek(next)
       if (formatDateISO(nextWeek) !== formatDateISO(weekStart)) setWeekStart(nextWeek)
+    }
+  }
+
+  // Bozze nella vista corrente (giorno o settimana)
+  const draftsInView = useMemo(() => {
+    if (viewMode === 'day') {
+      const target = formatDateISO(selectedDay)
+      return shifts.filter((s) => s.status === 'draft' && startDateOfShift(s.start_at) === target)
+    }
+    return shifts.filter((s) => s.status === 'draft')
+  }, [shifts, viewMode, selectedDay])
+
+  // Riepilogo per la conferma: dipendenti coinvolti + count per ognuno
+  const publishSummary = useMemo(() => {
+    const map = new Map()
+    for (const s of draftsInView) {
+      const sm = staff.find((x) => x.id === s.staff_id)
+      const name = sm ? `${sm.first_name} ${sm.last_name}` : 'Dipendente sconosciuto'
+      map.set(name, (map.get(name) || 0) + 1)
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+  }, [draftsInView, staff])
+
+  const handlePublishBatch = async () => {
+    if (draftsInView.length === 0) return
+    setPublishing(true)
+    const ids = draftsInView.map((s) => s.id)
+    const { data, error } = await supabase.rpc('publish_shifts_batch', { p_shift_ids: ids })
+    setPublishing(false)
+    setPublishConfirmOpen(false)
+    if (error) {
+      setToast({ msg: 'Errore: ' + error.message, kind: 'error' })
+      setTimeout(() => setToast(null), 4000)
+    } else {
+      const count = data || ids.length
+      setToast({ msg: `Pubblicati ${count} ${count === 1 ? 'turno' : 'turni'}!`, kind: 'success' })
+      setTimeout(() => setToast(null), 3000)
+      fetchData()
     }
   }
 
@@ -348,12 +406,48 @@ export default function Planning() {
             <BookCopy size={16} /> Template
           </button>
 
+          {/* Toggle modalità Edit (silenzia push) */}
+          <button onClick={() => setEditMode((v) => !v)}
+            title={editMode
+              ? "Modalità Edit attiva: le modifiche non mandano notifiche"
+              : "Attiva Modalità Edit: lavora sul planning senza notificare i dipendenti"}
+            className={`flex items-center gap-2 border font-sans font-semibold px-3 py-2 rounded-xl transition ${
+              editMode
+                ? 'bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200'
+                : 'border-cream-300 text-warm-dark hover:bg-cream-100'
+            }`}>
+            {editMode ? <><Pencil size={14} /> Edit silenzioso</> : <><Eye size={14} /> Modifica</>}
+          </button>
+
+          {/* Pubblica X bozze */}
+          {draftsInView.length > 0 && (
+            <button onClick={() => setPublishConfirmOpen(true)}
+              className="flex items-center gap-2 bg-sage-500 hover:bg-sage-600 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm">
+              <Send size={16} /> Pubblica {draftsInView.length}
+              {viewMode === 'day' ? ' (giorno)' : ' (settimana)'}
+            </button>
+          )}
+
           <button onClick={handleNewClick}
             className="flex items-center gap-2 bg-terracotta-400 hover:bg-terracotta-500 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm">
             <Plus size={16} /> Nuovo turno
           </button>
         </div>
       </div>
+
+      {/* Banner Modalità Edit attiva */}
+      {editMode && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-2.5 mb-4 flex items-center gap-3">
+          <Pencil size={16} className="text-amber-700 flex-shrink-0" />
+          <div className="font-sans text-sm text-amber-900 flex-1">
+            <strong>Modalità Edit attiva.</strong> Le modifiche ai turni esistenti <em>non</em> manderanno notifiche ai dipendenti. Disattiva quando hai finito.
+          </div>
+          <button onClick={() => setEditMode(false)}
+            className="font-sans text-xs font-semibold text-amber-800 hover:text-amber-900 underline flex-shrink-0">
+            Disattiva
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-4 mb-6">
         <StatBox label={viewMode === 'day' ? 'Turni del giorno' : 'Turni della settimana'} value={stats.totalShifts} />
@@ -409,6 +503,7 @@ export default function Planning() {
           allShifts={shifts}
           availability={availability}
           approvedLeaves={approvedLeaves}
+          editMode={editMode}
           onClose={() => { setModalOpen(false); setEditingShift(null); setPresetCell(null) }}
           onSaved={handleSaved}
           onError={(msg) => showToast(msg, 'error')}
@@ -430,6 +525,56 @@ export default function Planning() {
           {toast.msg}
         </div>
       )}
+
+      {publishConfirmOpen && (
+        <PublishConfirmModal
+          count={draftsInView.length}
+          summary={publishSummary}
+          scope={viewMode === 'day' ? 'questo giorno' : 'questa settimana'}
+          publishing={publishing}
+          onConfirm={handlePublishBatch}
+          onClose={() => setPublishConfirmOpen(false)} />
+      )}
+    </div>
+  )
+}
+
+// ---- PublishConfirmModal ----
+function PublishConfirmModal({ count, summary, scope, publishing, onConfirm, onClose }) {
+  return (
+    <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
+        <div className="px-6 py-4 border-b border-cream-200">
+          <h2 className="font-serif text-2xl text-warm-dark">Pubblica {count} {count === 1 ? 'turno' : 'turni'}</h2>
+          <p className="font-sans text-xs text-warm-brown mt-1">
+            Bozze di {scope}. Ogni dipendente riceverà UNA notifica con il riepilogo.
+          </p>
+        </div>
+        <div className="px-6 py-4 max-h-72 overflow-y-auto">
+          <div className="font-sans text-xs uppercase tracking-wider text-warm-brown mb-2">
+            Dipendenti coinvolti
+          </div>
+          <div className="space-y-1.5">
+            {summary.map(([name, n]) => (
+              <div key={name} className="flex items-center justify-between font-sans text-sm">
+                <span className="text-warm-dark">{name}</span>
+                <span className="font-semibold text-warm-brown">{n} {n === 1 ? 'turno' : 'turni'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-cream-200">
+          <button onClick={onClose} disabled={publishing}
+            className="px-4 py-2 rounded-xl font-sans font-semibold text-warm-brown hover:bg-cream-100 transition">
+            Annulla
+          </button>
+          <button onClick={onConfirm} disabled={publishing}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-sage-500 hover:bg-sage-600 disabled:bg-sage-300 text-white font-sans font-semibold transition shadow-sm">
+            <Send size={14} />
+            {publishing ? 'Pubblicazione…' : `Pubblica ${count}`}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
