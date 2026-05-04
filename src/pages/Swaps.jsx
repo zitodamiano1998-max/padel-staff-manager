@@ -3,8 +3,9 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import SwapCreateModal from '../components/SwapCreateModal'
 import SwapReviewModal from '../components/SwapReviewModal'
+import CoverageTab from '../components/Coverage'
 import {
-  Plus, ArrowLeftRight, AlertCircle, Hand, X, Check, Clock as ClockIcon,
+  Plus, ArrowLeftRight, AlertCircle, Hand, X, Check, Clock as ClockIcon, Search,
 } from 'lucide-react'
 import { formatDayLong, formatTimeFromISO } from '../lib/dateUtils'
 
@@ -27,6 +28,7 @@ export default function Swaps() {
   const [createOpen, setCreateOpen] = useState(false)
   const [reviewSwap, setReviewSwap] = useState(null)
   const [toast, setToast] = useState(null)
+  const [activeTab, setActiveTab] = useState('swaps') // swaps | coverage
 
   useEffect(() => { fetchData() }, [])
 
@@ -98,10 +100,42 @@ export default function Swaps() {
 
   return (
     <div>
-      {/* Header */}
+      {/* Header globale + Tab bar */}
+      <div className="mb-5">
+        <h1 className="text-4xl text-warm-dark mb-1">Scambi e coperture</h1>
+        <p className="font-sans text-sm text-warm-brown">
+          Cedi un turno o gestisci le richieste di copertura del manager.
+        </p>
+      </div>
+
+      <div className="flex border-b border-cream-300 mb-6 -mx-1">
+        <button onClick={() => setActiveTab('swaps')}
+          className={`flex items-center gap-2 px-4 py-2.5 font-sans text-sm font-semibold transition border-b-2 -mb-px ${
+            activeTab === 'swaps'
+              ? 'text-terracotta-600 border-terracotta-500'
+              : 'text-warm-brown border-transparent hover:text-warm-dark'
+          }`}>
+          <ArrowLeftRight size={15} /> Scambi
+        </button>
+        <button onClick={() => setActiveTab('coverage')}
+          className={`flex items-center gap-2 px-4 py-2.5 font-sans text-sm font-semibold transition border-b-2 -mb-px ${
+            activeTab === 'coverage'
+              ? 'text-terracotta-600 border-terracotta-500'
+              : 'text-warm-brown border-transparent hover:text-warm-dark'
+          }`}>
+          <Search size={15} /> Coperture
+        </button>
+      </div>
+
+      {activeTab === 'coverage' && (
+        <CoverageTab onToast={(msg, type) => showToast(msg, type)} />
+      )}
+
+      {activeTab === 'swaps' && (
+      <>
+      {/* Header sezione Scambi */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-4xl text-warm-dark mb-1">Scambi turno</h1>
           <p className="font-sans text-sm text-warm-brown">
             Cedi un turno alla squadra. Un collega può candidarsi e il manager approva il passaggio.
           </p>
@@ -184,6 +218,8 @@ export default function Swaps() {
               onReview={() => setReviewSwap(s)} />
           ))}
         </div>
+      )}
+      </>
       )}
 
       {/* Modali */}
