@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Bell, CheckCheck,
   Palmtree, Calendar, ArrowLeftRight, Check, X, Hand, BellRing, BellOff,
+  Clock as ClockIcon, AlertCircle, FileText, Users, FolderOpen, Search, Award,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -267,8 +268,9 @@ export default function NotificationBell() {
 }
 
 function LiveToast({ notification, onClose, onClick }) {
-  const Icon = ICONS[notification.type] || ICONS.default
-  const tone = getToneFromType(notification.type)
+  const iconCfg = ICONS[notification?.type] || ICONS.default
+  const IconEl = iconCfg.El
+  const tone = getToneFromType(notification?.type)
   const colorMap = {
     positive: { bg: 'bg-sage-50', border: 'border-sage-300', accent: 'text-sage-700', iconBg: 'bg-sage-100' },
     info: { bg: 'bg-white', border: 'border-cream-300', accent: 'text-warm-dark', iconBg: 'bg-cream-100' },
@@ -280,14 +282,14 @@ function LiveToast({ notification, onClose, onClick }) {
       <div className="flex items-start gap-3">
         <button onClick={onClick} className="flex items-start gap-3 flex-1 text-left min-w-0">
           <div className={`w-9 h-9 ${c.iconBg} rounded-xl flex items-center justify-center flex-shrink-0 ${c.accent}`}>
-            <Icon size={16} />
+            <IconEl size={16} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="font-sans font-semibold text-sm text-warm-dark mb-0.5">
-              {notification.title}
+              {notification?.title || 'Notifica'}
             </div>
             <div className="font-sans text-xs text-warm-brown line-clamp-2">
-              {notification.body}
+              {notification?.body || ''}
             </div>
           </div>
         </button>
@@ -340,15 +342,43 @@ function NotificationItem({ n, onClick }) {
 }
 
 const ICONS = {
+  // Ferie
   leave_pending: { El: Palmtree, bg: 'bg-amber-100', fg: 'text-amber-700' },
   leave_approved: { El: Check, bg: 'bg-sage-100', fg: 'text-sage-700' },
   leave_rejected: { El: X, bg: 'bg-red-100', fg: 'text-red-700' },
+  // Turni
   shift_assigned: { El: Calendar, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  shift_published: { El: Calendar, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  shift_updated: { El: Calendar, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  shift_cancelled: { El: X, bg: 'bg-red-100', fg: 'text-red-700' },
+  shift_reminder: { El: ClockIcon, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  // Timbrature
+  clock_in_forgotten: { El: AlertCircle, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  clock_out_forgotten: { El: AlertCircle, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  // Scambi
   swap_open: { El: ArrowLeftRight, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  swap_opened: { El: ArrowLeftRight, bg: 'bg-amber-100', fg: 'text-amber-700' },
   swap_claimed: { El: Hand, bg: 'bg-sage-100', fg: 'text-sage-700' },
+  swap_claimed_by_colleague: { El: Hand, bg: 'bg-sage-100', fg: 'text-sage-700' },
   swap_pending: { El: ArrowLeftRight, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
   swap_approved: { El: Check, bg: 'bg-sage-100', fg: 'text-sage-700' },
   swap_rejected: { El: X, bg: 'bg-red-100', fg: 'text-red-700' },
+  swap_open_stale: { El: ClockIcon, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  // Coperture
+  coverage_invitation: { El: Search, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  coverage_assigned: { El: Award, bg: 'bg-sage-100', fg: 'text-sage-700' },
+  coverage_not_assigned: { El: X, bg: 'bg-cream-200', fg: 'text-warm-brown' },
+  // Disponibilità
+  availability_reminder: { El: ClockIcon, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  // Riepiloghi periodici
+  weekly_summary_ahead: { El: Calendar, bg: 'bg-cream-200', fg: 'text-warm-brown' },
+  weekly_summary_done: { El: Calendar, bg: 'bg-sage-100', fg: 'text-sage-700' },
+  monthly_summary: { El: Calendar, bg: 'bg-sage-100', fg: 'text-sage-700' },
+  no_shifts_warning: { El: AlertCircle, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  // Documenti
+  document_uploaded: { El: FolderOpen, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  document_received: { El: FileText, bg: 'bg-sage-100', fg: 'text-sage-700' },
+  // Default
   default: { El: Bell, bg: 'bg-cream-200', fg: 'text-warm-brown' },
 }
 
