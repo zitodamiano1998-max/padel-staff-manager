@@ -88,7 +88,7 @@ function EmployeeDashboard({ profile }) {
       // Ferie approvate nei prossimi 7 giorni
       supabase
         .from('leave_requests')
-        .select('id, type, start_date, end_date')
+        .select('id, leave_type, start_date, end_date')
         .eq('staff_id', profile.id)
         .eq('status', 'approved')
         .gte('start_date', todayISO)
@@ -105,7 +105,7 @@ function EmployeeDashboard({ profile }) {
       // Ultima ferie approvata negli ultimi 3 giorni (per banner positivo)
       supabase
         .from('leave_requests')
-        .select('id, type, start_date, end_date, reviewed_at')
+        .select('id, leave_type, start_date, end_date, reviewed_at')
         .eq('staff_id', profile.id)
         .eq('status', 'approved')
         .gte('reviewed_at', addDays(now, -3).toISOString())
@@ -544,7 +544,7 @@ function UpcomingLeavesSection({ leaves }) {
           const dateLabel = l.start_date === l.end_date
             ? start.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
             : `${start.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} → ${end.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`
-          const typeLabel = l.type === 'vacation' ? 'Ferie' : l.type === 'permission' ? 'Permesso' : l.type === 'sick' ? 'Malattia' : l.type
+          const typeLabel = l.leave_type === 'vacation' ? 'Ferie' : l.leave_type === 'permission' ? 'Permesso' : l.leave_type === 'sick' ? 'Malattia' : l.leave_type
           return (
             <div key={l.id} className="flex items-center gap-3">
               <CheckCircle2 size={14} className="text-sage-600 flex-shrink-0" />
@@ -605,7 +605,7 @@ function UpcomingShiftsList({ shifts }) {
 function PositiveBanner({ leave }) {
   const start = new Date(leave.start_date + 'T00:00:00')
   const dateLabel = start.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })
-  const typeLabel = leave.type === 'vacation' ? 'ferie' : leave.type === 'permission' ? 'permesso' : leave.type
+  const typeLabel = leave.leave_type === 'vacation' ? 'ferie' : leave.leave_type === 'permission' ? 'permesso' : leave.leave_type
   return (
     <div className="flex items-center gap-3 bg-sage-50 border border-sage-200 rounded-xl px-5 py-3">
       <Sparkles size={18} className="text-sage-600 flex-shrink-0" />
