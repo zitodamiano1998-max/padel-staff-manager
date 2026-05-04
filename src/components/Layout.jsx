@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
-  Settings as SettingsIcon, CalendarPlus,
+  Settings as SettingsIcon, CalendarPlus, FolderOpen,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import InstallPrompt from './InstallPrompt'
@@ -99,6 +99,9 @@ export default function Layout({ children }) {
                 Calendario
               </NavLink>
             )}
+            <NavLink to="/documents" icon={<FolderOpen size={16} />} active={isActive('/documents')}>
+              Documenti
+            </NavLink>
             {profile?.is_manager && (
               <>
                 <NavLink to="/staff" icon={<Users size={16} />} active={isActive('/staff')}>
