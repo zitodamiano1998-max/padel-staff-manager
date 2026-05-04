@@ -37,7 +37,7 @@ export default function CoverageTab({ onToast }) {
             roles(id, name, color),
             staff:staff_members!shifts_staff_id_fkey(id, first_name, last_name)
           ),
-          invitations:coverage_invitations(
+          invitations:coverage_invitations!coverage_invitations_request_id_fkey(
             id, status, responded_at,
             invitee:staff_members!coverage_invitations_invitee_id_fkey(id, first_name, last_name)
           )
