@@ -45,6 +45,7 @@ export default function Planning() {
   const [editMode, setEditMode] = useState(false)  // true = silenzia push su modifiche
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  const [draftsSummary, setDraftsSummary] = useState({ total: 0, perStaff: [] })
 
   // Drag & drop
   const [activeShift, setActiveShift] = useState(null) // shift attualmente trascinato
@@ -291,41 +292,44 @@ export default function Planning() {
     }
   }
 
-  // Bozze nella vista corrente (giorno o settimana)
-  const draftsInView = useMemo(() => {
-    if (viewMode === 'day') {
-      const target = formatDateISO(selectedDay)
-      return shifts.filter((s) => s.status === 'draft' && startDateOfShift(s.start_at) === target)
+  // Fetch riepilogo bozze totali (RPC count_all_drafts)
+  const fetchDraftsSummary = async () => {
+    if (!isManager) return
+    const { data, error } = await supabase.rpc('count_all_drafts')
+    if (error) return
+    if (!data || data.length === 0) {
+      setDraftsSummary({ total: 0, perStaff: [] })
+      return
     }
-    return shifts.filter((s) => s.status === 'draft')
-  }, [shifts, viewMode, selectedDay])
+    setDraftsSummary({
+      total: data[0]?.total || 0,
+      perStaff: data.map((r) => ({
+        name: `${r.first_name || ''} ${r.last_name || ''}`.trim(),
+        count: Number(r.draft_count || 0),
+      })),
+    })
+  }
 
-  // Riepilogo per la conferma: dipendenti coinvolti + count per ognuno
-  const publishSummary = useMemo(() => {
-    const map = new Map()
-    for (const s of draftsInView) {
-      const sm = staff.find((x) => x.id === s.staff_id)
-      const name = sm ? `${sm.first_name} ${sm.last_name}` : 'Dipendente sconosciuto'
-      map.set(name, (map.get(name) || 0) + 1)
-    }
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
-  }, [draftsInView, staff])
+  useEffect(() => {
+    fetchDraftsSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManager, shifts])
 
   const handlePublishBatch = async () => {
-    if (draftsInView.length === 0) return
     setPublishing(true)
-    const ids = draftsInView.map((s) => s.id)
-    const { data, error } = await supabase.rpc('publish_shifts_batch', { p_shift_ids: ids })
+    // Passo NULL → la RPC pubblica TUTTE le bozze
+    const { data, error } = await supabase.rpc('publish_shifts_batch', { p_shift_ids: null })
     setPublishing(false)
     setPublishConfirmOpen(false)
     if (error) {
       setToast({ msg: 'Errore: ' + error.message, kind: 'error' })
       setTimeout(() => setToast(null), 4000)
     } else {
-      const count = data || ids.length
+      const count = data || 0
       setToast({ msg: `Pubblicati ${count} ${count === 1 ? 'turno' : 'turni'}!`, kind: 'success' })
       setTimeout(() => setToast(null), 3000)
       fetchData()
+      fetchDraftsSummary()
     }
   }
 
@@ -419,12 +423,11 @@ export default function Planning() {
             {editMode ? <><Pencil size={14} /> Edit silenzioso</> : <><Eye size={14} /> Modifica</>}
           </button>
 
-          {/* Pubblica X bozze */}
-          {draftsInView.length > 0 && (
+          {/* Pubblica X bozze (tutte le bozze in DB) */}
+          {draftsSummary.total > 0 && (
             <button onClick={() => setPublishConfirmOpen(true)}
               className="flex items-center gap-2 bg-sage-500 hover:bg-sage-600 text-white font-sans font-semibold px-4 py-2 rounded-xl transition shadow-sm">
-              <Send size={16} /> Pubblica {draftsInView.length}
-              {viewMode === 'day' ? ' (giorno)' : ' (settimana)'}
+              <Send size={16} /> Pubblica {draftsSummary.total} {draftsSummary.total === 1 ? 'bozza' : 'bozze'}
             </button>
           )}
 
@@ -528,9 +531,8 @@ export default function Planning() {
 
       {publishConfirmOpen && (
         <PublishConfirmModal
-          count={draftsInView.length}
-          summary={publishSummary}
-          scope={viewMode === 'day' ? 'questo giorno' : 'questa settimana'}
+          count={draftsSummary.total}
+          summary={draftsSummary.perStaff}
           publishing={publishing}
           onConfirm={handlePublishBatch}
           onClose={() => setPublishConfirmOpen(false)} />
@@ -540,14 +542,14 @@ export default function Planning() {
 }
 
 // ---- PublishConfirmModal ----
-function PublishConfirmModal({ count, summary, scope, publishing, onConfirm, onClose }) {
+function PublishConfirmModal({ count, summary, publishing, onConfirm, onClose }) {
   return (
     <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
         <div className="px-6 py-4 border-b border-cream-200">
-          <h2 className="font-serif text-2xl text-warm-dark">Pubblica {count} {count === 1 ? 'turno' : 'turni'}</h2>
+          <h2 className="font-serif text-2xl text-warm-dark">Pubblica {count} {count === 1 ? 'bozza' : 'bozze'}</h2>
           <p className="font-sans text-xs text-warm-brown mt-1">
-            Bozze di {scope}. Ogni dipendente riceverà UNA notifica con il riepilogo.
+            Tutte le bozze esistenti verranno pubblicate. Ogni dipendente riceverà UNA notifica con il riepilogo.
           </p>
         </div>
         <div className="px-6 py-4 max-h-72 overflow-y-auto">
@@ -555,10 +557,10 @@ function PublishConfirmModal({ count, summary, scope, publishing, onConfirm, onC
             Dipendenti coinvolti
           </div>
           <div className="space-y-1.5">
-            {summary.map(([name, n]) => (
-              <div key={name} className="flex items-center justify-between font-sans text-sm">
-                <span className="text-warm-dark">{name}</span>
-                <span className="font-semibold text-warm-brown">{n} {n === 1 ? 'turno' : 'turni'}</span>
+            {summary.map((row) => (
+              <div key={row.name} className="flex items-center justify-between font-sans text-sm">
+                <span className="text-warm-dark">{row.name}</span>
+                <span className="font-semibold text-warm-brown">{row.count} {row.count === 1 ? 'turno' : 'turni'}</span>
               </div>
             ))}
           </div>
