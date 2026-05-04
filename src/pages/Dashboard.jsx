@@ -99,7 +99,7 @@ function EmployeeDashboard({ profile }) {
       supabase
         .from('shift_swaps')
         .select('id', { count: 'exact', head: true })
-        .or(`proposer_id.eq.${profile.id},claimer_id.eq.${profile.id}`)
+        .or(`requester_id.eq.${profile.id},target_id.eq.${profile.id}`)
         .in('status', ['open', 'proposed']),
 
       // Ultima ferie approvata negli ultimi 3 giorni (per banner positivo)
