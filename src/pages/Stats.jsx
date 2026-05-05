@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import {
   BarChart3, Calendar, Clock as ClockIcon, AlertCircle, CheckCircle2,
   Users, Moon, Sun, ArrowLeftRight, Palmtree, Search, Download,
-  ChevronDown, ChevronUp, TrendingUp, TrendingDown,
+  ChevronDown, ChevronUp, TrendingUp, TrendingDown, Euro,
 } from 'lucide-react'
 
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab']
@@ -27,6 +27,7 @@ export default function Stats() {
     punctuality: true,
     reliability: true,
     team_health: true,
+    costs: true,
   })
 
   const { startDate, endDate, label } = useMemo(() => computeRange(preset, customStart, customEnd), [preset, customStart, customEnd])
@@ -112,10 +113,10 @@ export default function Stats() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
             <KpiCard label="Turni" value={data.totals?.shifts_total ?? 0} icon={Calendar} color="#C97D60" />
             <KpiCard label="Ore" value={data.totals?.hours_total ?? 0} icon={ClockIcon} color="#5C8D7E" />
+            <KpiCard label="Costo team" value={fmtEuro(data.totals?.cost_total)} icon={Euro} color="#7B6F60" />
             <KpiCard label="Ferie" value={data.totals?.leaves_total ?? 0} icon={Palmtree} color="#D4A574" />
             <KpiCard label="Scambi" value={data.totals?.swaps_total ?? 0} icon={ArrowLeftRight} color="#8B7355" />
-            <KpiCard label="Coperture" value={data.totals?.coverage_requests_total ?? 0} icon={Search} color="#A86B5C" />
-            <KpiCard label="Dipendenti" value={data.totals?.staff_active ?? 0} icon={Users} color="#7B6F60" />
+            <KpiCard label="Dipendenti" value={data.totals?.staff_active ?? 0} icon={Users} color="#A86B5C" />
           </div>
 
           {/* VOLUME */}
@@ -137,6 +138,13 @@ export default function Stats() {
             icon={ArrowLeftRight}
             expanded={expanded.reliability} onToggle={() => toggle('reliability')}>
             <ReliabilitySection data={data.reliability || []} />
+          </Section>
+
+          {/* COSTS */}
+          <Section title="Costi" subtitle="Costo per dipendente nel periodo (basato su tariffa oraria o stipendio mensile)"
+            icon={Euro}
+            expanded={expanded.costs} onToggle={() => toggle('costs')}>
+            <CostsSection data={data.costs || []} totalCost={data.totals?.cost_total} />
           </Section>
 
           {/* TEAM HEALTH */}
@@ -186,6 +194,13 @@ function computeRange(preset, customStart, customEnd) {
 }
 function formatIt(d) { return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' }) }
 function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1) }
+
+function fmtEuro(n) {
+  if (n === null || n === undefined) return '—'
+  const num = Number(n)
+  if (isNaN(num)) return '—'
+  return num.toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
+}
 
 // ============================================================================
 // KPI CARD
@@ -477,6 +492,100 @@ function TeamHealthSection({ data }) {
         </div>
       </div>
     </div>
+  )
+}
+
+// ============================================================================
+// COSTS
+// ============================================================================
+function CostsSection({ data, totalCost }) {
+  if (!data || data.length === 0) return <Empty />
+
+  const compTypeLabel = (t) => ({
+    hourly: 'Oraria',
+    monthly: 'Mensile',
+    none: 'Non tracciato',
+  }[t] || t)
+
+  return (
+    <div>
+      <ExportCSV data={data.map((r) => ({
+        ...r,
+        compensation_type_label: compTypeLabel(r.compensation_type),
+      }))} filename="costi" columns={[
+        { key: 'name', label: 'Dipendente' },
+        { key: 'compensation_type_label', label: 'Tipo retribuzione' },
+        { key: 'hourly_rate', label: 'Tariffa oraria (€)' },
+        { key: 'monthly_salary', label: 'Stipendio mensile (€)' },
+        { key: 'hours_actual', label: 'Ore effettive' },
+        { key: 'cost_total', label: 'Costo totale (€)' },
+      ]} />
+
+      <div className="bg-cream-100 rounded-xl p-3 my-3 flex items-center justify-between">
+        <span className="font-sans text-sm text-warm-brown">Costo totale team nel periodo</span>
+        <span className="font-serif text-2xl font-semibold text-warm-dark">{fmtEuro(totalCost)}</span>
+      </div>
+
+      <div className="overflow-x-auto -mx-2">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left font-sans text-xs uppercase tracking-wider text-warm-brown border-b border-cream-200">
+              <th className="px-3 py-2">Dipendente</th>
+              <th className="px-3 py-2">Tipo</th>
+              <th className="px-3 py-2 text-right">Tariffa</th>
+              <th className="px-3 py-2 text-right">Ore effettive</th>
+              <th className="px-3 py-2 text-right">Costo periodo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row) => (
+              <tr key={row.staff_id} className="border-b border-cream-100 last:border-0">
+                <td className="px-3 py-2 font-sans font-semibold text-warm-dark">{row.name}</td>
+                <td className="px-3 py-2">
+                  <CompTypeBadge type={row.compensation_type} />
+                </td>
+                <td className="px-3 py-2 text-right font-sans text-warm-dark">
+                  {row.compensation_type === 'hourly' && row.hourly_rate
+                    ? `${fmtEuro(row.hourly_rate)}/h`
+                    : row.compensation_type === 'monthly' && row.monthly_salary
+                    ? `${fmtEuro(row.monthly_salary)}/mese`
+                    : '—'}
+                </td>
+                <td className="px-3 py-2 text-right font-sans text-warm-dark">
+                  {row.hours_actual} h
+                </td>
+                <td className="px-3 py-2 text-right font-sans font-semibold text-warm-dark">
+                  {row.cost_total !== null && row.cost_total !== undefined
+                    ? fmtEuro(row.cost_total)
+                    : <span className="font-normal text-warm-brown text-xs">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="font-sans text-xs text-warm-brown mt-3 leading-relaxed">
+        Le ore effettive sono calcolate dalle timbrature (clock in/out). Per i dipendenti a stipendio mensile,
+        il costo del periodo è proporzionale ai giorni selezionati (×giorni/30). I dipendenti con tipo
+        retribuzione "Non tracciato" mostrano solo le ore senza calcolo costo: imposta una tariffa oraria
+        o uno stipendio mensile dall'Anagrafica.
+      </p>
+    </div>
+  )
+}
+
+function CompTypeBadge({ type }) {
+  const map = {
+    hourly: { label: 'Oraria', cls: 'bg-terracotta-100 text-terracotta-700' },
+    monthly: { label: 'Mensile', cls: 'bg-sage-100 text-sage-700' },
+    none: { label: 'Non tracciato', cls: 'bg-cream-200 text-warm-brown' },
+  }
+  const c = map[type] || map.none
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded font-sans text-xs font-semibold ${c.cls}`}>
+      {c.label}
+    </span>
   )
 }
 
