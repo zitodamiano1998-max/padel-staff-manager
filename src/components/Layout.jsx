@@ -241,19 +241,22 @@ export default function Layout({ children }) {
             </div>
 
             <nav className="flex-1 overflow-y-auto py-2">
-              {drawerItems.map((item) => (
-                <Link key={item.to}
-                  to={item.to}
-                  onClick={() => setDrawerOpen(false)}
-                  className={`flex items-center gap-3 px-5 py-3 transition ${
-                    isActive(item.to)
-                      ? 'bg-cream-100 text-warm-dark font-semibold border-r-4 border-terracotta-400'
-                      : 'text-warm-brown hover:bg-cream-50'
-                  }`}>
-                  <item.icon size={20} />
-                  <span className="font-sans text-base">{item.label}</span>
-                </Link>
-              ))}
+              {drawerItems.map((item) => {
+                const Icon = item.icon
+                return (
+                  <Link key={item.to}
+                    to={item.to}
+                    onClick={() => setDrawerOpen(false)}
+                    className={`flex items-center gap-3 px-5 py-3 transition ${
+                      isActive(item.to)
+                        ? 'bg-cream-100 text-warm-dark font-semibold border-r-4 border-terracotta-400'
+                        : 'text-warm-brown hover:bg-cream-50'
+                    }`}>
+                    <Icon size={20} />
+                    <span className="font-sans text-base">{item.label}</span>
+                  </Link>
+                )
+              })}
             </nav>
 
             <div className="px-5 py-3 border-t border-cream-200">
