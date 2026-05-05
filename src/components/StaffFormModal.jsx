@@ -13,7 +13,9 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
     role_id: '',
     contract_type: 'part_time',
     weekly_hours: 40,
+    compensation_type: 'none',
     hourly_rate: '',
+    monthly_salary: '',
     hire_date: '',
     fiscal_code: '',
     iban: '',
@@ -32,7 +34,9 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
         role_id: staff.role_id || '',
         contract_type: staff.contract_type || 'part_time',
         weekly_hours: staff.weekly_hours ?? 40,
+        compensation_type: staff.compensation_type || 'none',
         hourly_rate: staff.hourly_rate ?? '',
+        monthly_salary: staff.monthly_salary ?? '',
         hire_date: staff.hire_date || '',
         fiscal_code: staff.fiscal_code || '',
         iban: staff.iban || '',
@@ -58,7 +62,11 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
           role_id: form.role_id || null,
           contract_type: form.contract_type,
           weekly_hours: parseFloat(form.weekly_hours) || 40,
-          hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
+          compensation_type: form.compensation_type || 'none',
+          hourly_rate: form.compensation_type === 'hourly' && form.hourly_rate
+            ? parseFloat(form.hourly_rate) : null,
+          monthly_salary: form.compensation_type === 'monthly' && form.monthly_salary
+            ? parseFloat(form.monthly_salary) : null,
           hire_date: form.hire_date || null,
           fiscal_code: form.fiscal_code?.trim() || null,
           iban: form.iban?.trim() || null,
@@ -81,7 +89,11 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
             role_id: form.role_id || null,
             contract_type: form.contract_type,
             weekly_hours: parseFloat(form.weekly_hours) || 40,
-            hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
+            compensation_type: form.compensation_type || 'none',
+            hourly_rate: form.compensation_type === 'hourly' && form.hourly_rate
+              ? parseFloat(form.hourly_rate) : null,
+            monthly_salary: form.compensation_type === 'monthly' && form.monthly_salary
+              ? parseFloat(form.monthly_salary) : null,
             hire_date: form.hire_date || null,
             fiscal_code: form.fiscal_code?.trim() || null,
             iban: form.iban?.trim() || null,
@@ -169,18 +181,60 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
             </Field>
           </div>
 
-          {/* Ore + Paga */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Ore settimanali">
-              <input type="number" step="0.5" min="0" max="60" value={form.weekly_hours}
-                onChange={update('weekly_hours')} className={inputCls} />
-            </Field>
-            <Field label="Paga oraria (€)">
+          {/* Ore settimanali */}
+          <Field label="Ore settimanali">
+            <input type="number" step="0.5" min="0" max="60" value={form.weekly_hours}
+              onChange={update('weekly_hours')} className={inputCls} />
+          </Field>
+
+          {/* Tipo retribuzione */}
+          <Field label="Tipo retribuzione">
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 'hourly', label: 'Oraria', sub: '€/ora' },
+                { value: 'monthly', label: 'Mensile', sub: '€/mese' },
+                { value: 'none', label: 'Non tracciata', sub: 'paga esterna' },
+              ].map((opt) => (
+                <label key={opt.value}
+                  className={`flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-xl border-2 cursor-pointer transition text-center ${
+                    form.compensation_type === opt.value
+                      ? 'border-terracotta-400 bg-terracotta-50'
+                      : 'border-cream-300 bg-white hover:border-cream-400'
+                  }`}>
+                  <input type="radio" name="compensation_type" value={opt.value}
+                    checked={form.compensation_type === opt.value}
+                    onChange={update('compensation_type')}
+                    className="hidden" />
+                  <span className={`font-sans text-sm font-semibold ${
+                    form.compensation_type === opt.value ? 'text-terracotta-700' : 'text-warm-dark'
+                  }`}>{opt.label}</span>
+                  <span className="font-sans text-xs text-warm-brown">{opt.sub}</span>
+                </label>
+              ))}
+            </div>
+          </Field>
+
+          {/* Importo - condizionale */}
+          {form.compensation_type === 'hourly' && (
+            <Field label="Tariffa oraria (€)">
               <input type="number" step="0.01" min="0" value={form.hourly_rate}
                 onChange={update('hourly_rate')} className={inputCls}
                 placeholder="es. 12.50" />
+              <p className="font-sans text-xs text-warm-brown mt-1">
+                Costo calcolato: ore effettive timbrate × tariffa
+              </p>
             </Field>
-          </div>
+          )}
+          {form.compensation_type === 'monthly' && (
+            <Field label="Stipendio mensile lordo (€)">
+              <input type="number" step="0.01" min="0" value={form.monthly_salary}
+                onChange={update('monthly_salary')} className={inputCls}
+                placeholder="es. 1500" />
+              <p className="font-sans text-xs text-warm-brown mt-1">
+                Costo calcolato: stipendio × (giorni periodo / 30)
+              </p>
+            </Field>
+          )}
 
           {/* Hire date */}
           <Field label="Data assunzione">
