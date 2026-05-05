@@ -13,6 +13,7 @@ import Swaps from './pages/Swaps'
 import Settings from './pages/Settings'
 import MyCalendar from './pages/MyCalendar'
 import Documents from './pages/Documents'
+import Stats from './pages/Stats'
 import AcceptInvite from './pages/AcceptInvite'
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
       <Route path="/timesheets" element={<ProtectedRoute><Layout><Timesheets /></Layout></ProtectedRoute>} />
       <Route path="/my-calendar" element={<ProtectedRoute><Layout><MyCalendar /></Layout></ProtectedRoute>} />
       <Route path="/documents" element={<ProtectedRoute><Layout><Documents /></Layout></ProtectedRoute>} />
+      <Route path="/stats" element={<ProtectedRoute><Layout><Stats /></Layout></ProtectedRoute>} />
 
       <Route path="/staff" element={<ProtectedRoute requireManager><Layout><Staff /></Layout></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute requireManager><Layout><Settings /></Layout></ProtectedRoute>} />

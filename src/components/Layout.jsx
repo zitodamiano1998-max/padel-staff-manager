@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
-  Settings as SettingsIcon, CalendarPlus, FolderOpen,
+  Settings as SettingsIcon, CalendarPlus, FolderOpen, BarChart3,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import InstallPrompt from './InstallPrompt'
@@ -106,6 +106,9 @@ export default function Layout({ children }) {
               <>
                 <NavLink to="/staff" icon={<Users size={16} />} active={isActive('/staff')}>
                   Anagrafica
+                </NavLink>
+                <NavLink to="/stats" icon={<BarChart3 size={16} />} active={isActive('/stats')}>
+                  Statistiche
                 </NavLink>
                 <NavLink to="/settings" icon={<SettingsIcon size={16} />} active={isActive('/settings')}>
                   Impostazioni
