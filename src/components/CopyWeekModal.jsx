@@ -10,7 +10,19 @@ function startOfWeekISO(date) {
   d.setHours(0, 0, 0, 0)
   return d
 }
-function toISO(d) { return d.toISOString().substring(0, 10) }
+function toISO(d) {
+  // YYYY-MM-DD in local time (evita timezone shift di toISOString)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function parseISO(iso) {
+  // Parse YYYY-MM-DD in local time (NO timezone shift)
+  if (!iso) return new Date()
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
 function addDays(d, n) {
   const x = new Date(d)
   x.setDate(x.getDate() + n)
@@ -45,25 +57,20 @@ export default function CopyWeekModal({ initialMonday, onClose, onDone }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
-  // Snap a lunedì quando si cambia data
-  useEffect(() => {
-    const monday = startOfWeekISO(new Date(sourceISO + 'T12:00:00'))
-    const snapped = toISO(monday)
-    if (snapped !== sourceISO) setSourceISO(snapped)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceISO])
-  useEffect(() => {
-    const monday = startOfWeekISO(new Date(targetSingleISO + 'T12:00:00'))
-    const snapped = toISO(monday)
-    if (snapped !== targetSingleISO) setTargetSingleISO(snapped)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetSingleISO])
-  useEffect(() => {
-    const monday = startOfWeekISO(new Date(targetMultiStartISO + 'T12:00:00'))
-    const snapped = toISO(monday)
-    if (snapped !== targetMultiStartISO) setTargetMultiStartISO(snapped)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetMultiStartISO])
+  // Helper: snap a lunedì la data ISO
+  const snapToMonday = (iso) => {
+    if (!iso) return iso
+    // Parse ISO senza timezone shift (uso parts manualmente)
+    const [y, m, d] = iso.split('-').map(Number)
+    const date = new Date(y, m - 1, d)  // local time, no timezone shift
+    const day = date.getDay() || 7  // Mon=1..Sun=7
+    date.setDate(date.getDate() - day + 1)
+    return toISO(date)
+  }
+
+  const handleSourceChange = (iso) => setSourceISO(snapToMonday(iso))
+  const handleTargetSingleChange = (iso) => setTargetSingleISO(snapToMonday(iso))
+  const handleTargetMultiStartChange = (iso) => setTargetMultiStartISO(snapToMonday(iso))
 
   // Preview sorgente ad ogni cambio
   useEffect(() => {
@@ -83,7 +90,7 @@ export default function CopyWeekModal({ initialMonday, onClose, onDone }) {
   // Targets array
   const targets = useMemo(() => {
     if (targetMode === 'single') return [targetSingleISO]
-    const start = new Date(targetMultiStartISO + 'T12:00:00')
+    const start = parseISO(targetMultiStartISO)
     return Array.from({ length: Math.max(1, parseInt(targetMultiCount) || 1) }, (_, i) => toISO(addDays(start, i * 7)))
   }, [targetMode, targetSingleISO, targetMultiStartISO, targetMultiCount])
 
@@ -144,10 +151,10 @@ export default function CopyWeekModal({ initialMonday, onClose, onDone }) {
             </label>
             <div className="flex flex-wrap items-center gap-3">
               <input type="date" value={sourceISO}
-                onChange={(e) => setSourceISO(e.target.value)}
+                onChange={(e) => handleSourceChange(e.target.value)}
                 className="px-3 py-2 rounded-lg border border-cream-300 font-sans text-sm" />
               <span className="font-sans text-sm text-warm-brown">
-                {fmtItRange(new Date(sourceISO + 'T12:00:00'))}
+                {fmtItRange(parseISO(sourceISO))}
               </span>
             </div>
             <div className="mt-2 bg-cream-50 border border-cream-200 rounded-lg px-3 py-2">
@@ -189,10 +196,10 @@ export default function CopyWeekModal({ initialMonday, onClose, onDone }) {
             {targetMode === 'single' ? (
               <div className="flex flex-wrap items-center gap-3">
                 <input type="date" value={targetSingleISO}
-                  onChange={(e) => setTargetSingleISO(e.target.value)}
+                  onChange={(e) => handleTargetSingleChange(e.target.value)}
                   className="px-3 py-2 rounded-lg border border-cream-300 font-sans text-sm" />
                 <span className="font-sans text-sm text-warm-brown">
-                  {fmtItRange(new Date(targetSingleISO + 'T12:00:00'))}
+                  {fmtItRange(parseISO(targetSingleISO))}
                 </span>
               </div>
             ) : (
@@ -200,7 +207,7 @@ export default function CopyWeekModal({ initialMonday, onClose, onDone }) {
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="font-sans text-sm text-warm-brown">A partire da:</span>
                   <input type="date" value={targetMultiStartISO}
-                    onChange={(e) => setTargetMultiStartISO(e.target.value)}
+                    onChange={(e) => handleTargetMultiStartChange(e.target.value)}
                     className="px-3 py-2 rounded-lg border border-cream-300 font-sans text-sm" />
                   <span className="font-sans text-sm text-warm-brown">per</span>
                   <input type="number" min="1" max="12" value={targetMultiCount}
@@ -209,8 +216,8 @@ export default function CopyWeekModal({ initialMonday, onClose, onDone }) {
                   <span className="font-sans text-sm text-warm-brown">settimane consecutive</span>
                 </div>
                 <div className="font-sans text-xs text-warm-brown bg-cream-50 rounded-lg px-3 py-2">
-                  Verranno popolate {targets.length} settimane: dal {fmtItRange(new Date(targets[0] + 'T12:00:00'))}
-                  {' '}al {fmtItRange(new Date(targets[targets.length - 1] + 'T12:00:00'))}
+                  Verranno popolate {targets.length} settimane: dal {fmtItRange(parseISO(targets[0]))}
+                  {' '}al {fmtItRange(parseISO(targets[targets.length - 1]))}
                 </div>
               </div>
             )}
