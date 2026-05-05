@@ -9,9 +9,10 @@ import {
 } from '../lib/dateUtils'
 import ShiftFormModal from '../components/ShiftFormModal'
 import TemplatesModal from '../components/TemplatesModal'
+import CopyWeekModal from '../components/CopyWeekModal'
 import {
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Grid3x3, BookCopy, AlertTriangle,
-  Send, Pencil, Eye,
+  Send, Pencil, Eye, Copy,
 } from 'lucide-react'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -39,6 +40,7 @@ export default function Planning() {
   const [editingShift, setEditingShift] = useState(null)
   const [presetCell, setPresetCell] = useState(null)
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false)
+  const [copyWeekModalOpen, setCopyWeekModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
 
   // Modalità batch publish
@@ -410,6 +412,12 @@ export default function Planning() {
             <BookCopy size={16} /> Template
           </button>
 
+          <button onClick={() => setCopyWeekModalOpen(true)}
+            className="flex items-center gap-2 border border-cream-300 hover:bg-cream-100 text-warm-dark font-sans font-semibold px-4 py-2 rounded-xl transition"
+            title="Copia turni di una settimana in altre">
+            <Copy size={16} /> Copia turni
+          </button>
+
           {/* Toggle modalità Edit (silenzia push) */}
           <button onClick={() => setEditMode((v) => !v)}
             title={editMode
@@ -518,6 +526,25 @@ export default function Planning() {
           roles={roles}
           onClose={() => setTemplatesModalOpen(false)}
           onUpdate={fetchData}
+        />
+      )}
+
+      {copyWeekModalOpen && (
+        <CopyWeekModal
+          initialMonday={weekStart}
+          onClose={() => setCopyWeekModalOpen(false)}
+          onDone={(result) => {
+            setCopyWeekModalOpen(false)
+            const parts = []
+            if (result.inserted > 0) parts.push(`${result.inserted} turni copiati`)
+            if (result.replaced > 0) parts.push(`${result.replaced} sostituiti`)
+            if (result.skipped > 0) parts.push(`${result.skipped} saltati per ferie`)
+            const msg = parts.length > 0
+              ? `Copia completata: ${parts.join(', ')} in ${result.targets} ${result.targets === 1 ? 'settimana' : 'settimane'}`
+              : 'Nessun turno da copiare'
+            showToast(msg)
+            fetchData()
+          }}
         />
       )}
 
