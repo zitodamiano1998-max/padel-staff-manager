@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { startOfMonth, addMonths, addDays, isToday, isTomorrow, isYesterday } from 'date-fns'
 import { startOfWeek, formatDateISO } from '../lib/dateUtils'
+import ShiftCompanions from '../components/ShiftCompanions'
 import {
   Calendar, Clock as ClockIcon, Palmtree, ArrowRight, AlertCircle,
   ArrowLeftRight, MapPin, Sparkles, CheckCircle2,
@@ -145,6 +146,14 @@ function EmployeeDashboard({ profile }) {
 
       {/* Card prossimo turno (gigante) */}
       <NextShiftCard shift={nextShift} loading={loading} />
+
+      {/* Squadra del prossimo turno (solo se c'è un prossimo turno) */}
+      {nextShift && (
+        <div className="bg-white rounded-2xl border border-cream-300 p-5">
+          <h3 className="font-serif text-lg text-warm-dark mb-3">Squadra del turno</h3>
+          <ShiftCompanions shiftId={nextShift.id} compact={false} />
+        </div>
+      )}
 
       {/* Riga compatta KPI personali */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
