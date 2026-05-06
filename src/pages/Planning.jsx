@@ -42,7 +42,6 @@ export default function Planning() {
   const [presetCell, setPresetCell] = useState(null)
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false)
   const [copyWeekModalOpen, setCopyWeekModalOpen] = useState(false)
-  const [companionsShift, setCompanionsShift] = useState(null)
   const [toast, setToast] = useState(null)
 
   // Modalità batch publish
@@ -160,16 +159,10 @@ export default function Planning() {
 
   const handleShiftClick = (e, shift) => {
     e.stopPropagation()
-    if (isManager) {
-      setEditingShift(shift)
-      setPresetCell(null)
-      setModalOpen(true)
-    } else {
-      // Dipendente: solo se è un suo turno apre il dettaglio companions
-      if (shift.staff_id === profile?.id) {
-        setCompanionsShift(shift)
-      }
-    }
+    if (!isManager) return
+    setEditingShift(shift)
+    setPresetCell(null)
+    setModalOpen(true)
   }
 
   const handleNewClick = () => {
@@ -572,44 +565,6 @@ export default function Planning() {
           onConfirm={handlePublishBatch}
           onClose={() => setPublishConfirmOpen(false)} />
       )}
-
-      {companionsShift && (
-        <CompanionsDetailModal
-          shift={companionsShift}
-          onClose={() => setCompanionsShift(null)} />
-      )}
-    </div>
-  )
-}
-
-// ---- CompanionsDetailModal ----
-function CompanionsDetailModal({ shift, onClose }) {
-  const startD = new Date(shift.start_at)
-  const endD = new Date(shift.end_at)
-  const dateLbl = startD.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long' })
-  const timeLbl = `${startD.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })} – ${endD.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-  const role = shift.roles?.name
-
-  return (
-    <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4 overflow-y-auto"
-      onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden my-8"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-cream-200 flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <h2 className="font-serif text-2xl text-warm-dark capitalize">{dateLbl}</h2>
-            <p className="font-sans text-sm text-warm-brown mt-0.5">{timeLbl}{role && ` · ${role}`}</p>
-          </div>
-          <button onClick={onClose}
-            className="p-2 rounded-lg hover:bg-cream-100 text-warm-brown text-2xl leading-none">
-            ×
-          </button>
-        </div>
-        <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">
-          <div className="font-sans text-xs uppercase tracking-wider text-warm-brown mb-2">Squadra del turno</div>
-          <ShiftCompanions shiftId={shift.id} />
-        </div>
-      </div>
     </div>
   )
 }
@@ -1519,6 +1474,12 @@ function ShiftDetailModal({ shift, onClose }) {
               <span className="font-sans text-sm text-warm-dark italic">"{shift.notes}"</span>
             </DetailRow>
           )}
+          <div className="pt-4 border-t border-cream-200">
+            <div className="font-sans text-xs uppercase tracking-wider text-warm-brown mb-2">
+              Squadra del turno
+            </div>
+            <ShiftCompanions shiftId={shift.id} />
+          </div>
         </div>
         <div className="px-6 py-4 border-t border-cream-200 flex justify-end">
           <button onClick={onClose}
