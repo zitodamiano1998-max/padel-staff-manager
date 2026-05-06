@@ -21,9 +21,11 @@ export default function ShiftCompanions({ shiftId, compact = false }) {
     let cancelled = false
     setLoading(true)
     setError(null)
+    console.log('[ShiftCompanions] fetching companions for shift:', shiftId)
     supabase.rpc('get_shift_companions', { p_shift_id: shiftId })
       .then(({ data, error }) => {
         if (cancelled) return
+        console.log('[ShiftCompanions] response:', { data, error })
         if (error) setError(error.message)
         else setData(data)
         setLoading(false)
