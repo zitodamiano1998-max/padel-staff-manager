@@ -1,45 +1,79 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { X, Trash2 } from 'lucide-react'
+import { X, Trash2, Play, Square, Coffee } from 'lucide-react'
 
-export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClose, onSaved }) {
+const EVENT_TYPES = [
+  { value: 'clock_in', label: 'Inizio turno', Icon: Play },
+  { value: 'clock_out', label: 'Fine turno', Icon: Square },
+  { value: 'break_start', label: 'Inizio pausa', Icon: Coffee },
+  { value: 'break_end', label: 'Fine pausa', Icon: Play },
+]
+
+export default function TimeEntryFormModal({ entry, staff, preset, onClose, onSaved }) {
   const isEdit = !!entry
 
-  const [form, setForm] = useState(() => initialForm(entry, presetStaffId))
+  const [form, setForm] = useState(() => {
+    if (entry) {
+      const t = new Date(entry.event_time)
+      return {
+        staff_id: entry.staff_id,
+        event_type: entry.event_type,
+        date: toDateInputValue(t),
+        time: `${pad2(t.getHours())}:${pad2(t.getMinutes())}`,
+        notes: entry.notes || '',
+      }
+    }
+    if (preset) {
+      const t = new Date(preset.event_time || new Date())
+      return {
+        staff_id: preset.staff_id || '',
+        event_type: preset.event_type || 'clock_in',
+        date: toDateInputValue(t),
+        time: `${pad2(t.getHours())}:${pad2(t.getMinutes())}`,
+        notes: preset.notes || '',
+      }
+    }
+    const now = new Date()
+    return {
+      staff_id: '',
+      event_type: 'clock_in',
+      date: toDateInputValue(now),
+      time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`,
+      notes: '',
+    }
+  })
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState(null)
-
-  useEffect(() => {
-    setForm(initialForm(entry, presetStaffId))
-  }, [entry, presetStaffId])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
     try {
-      // Combina date + time in ISO timestamp (locale)
-      const dt = new Date(`${form.date}T${form.time}:00`)
-      if (isNaN(dt.getTime())) throw new Error('Data/ora non valida')
+      const eventTime = new Date(form.date + 'T' + form.time + ':00')
+      if (isNaN(eventTime.getTime())) throw new Error('Data o ora non valide')
 
       const payload = {
         staff_id: form.staff_id,
         event_type: form.event_type,
-        event_time: dt.toISOString(),
+        event_time: eventTime.toISOString(),
         notes: form.notes.trim() || null,
+        // Niente coordinate per timbratura manuale → trigger DB lascia distance/geofence a NULL
       }
 
       if (isEdit) {
-        const { error } = await supabase.from('time_entries').update(payload).eq('id', entry.id)
+        const { error } = await supabase
+          .from('time_entries')
+          .update(payload)
+          .eq('id', entry.id)
         if (error) throw error
+        onSaved('Timbratura modificata')
       } else {
-        // Insert manuale: NON passiamo lat/lng, così il trigger lascia tutto NULL
-        // → la riga risulta "manuale" (latitude IS NULL)
         const { error } = await supabase.from('time_entries').insert(payload)
         if (error) throw error
+        onSaved('Timbratura aggiunta')
       }
-      onSaved()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -48,16 +82,12 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
   }
 
   const handleDelete = async () => {
-    if (!confirm('Eliminare questa timbratura? L\'azione è irreversibile.')) return
+    if (!confirm('Eliminare questa timbratura? Operazione irreversibile.')) return
     setDeleting(true)
-    try {
-      const { error } = await supabase.from('time_entries').delete().eq('id', entry.id)
-      if (error) throw error
-      onSaved()
-    } catch (err) {
-      setError(err.message)
-      setDeleting(false)
-    }
+    const { error } = await supabase.from('time_entries').delete().eq('id', entry.id)
+    setDeleting(false)
+    if (error) setError(error.message)
+    else onSaved('Timbratura eliminata')
   }
 
   return (
@@ -67,7 +97,7 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-cream-200 flex-shrink-0">
           <h2 className="text-2xl text-warm-dark">
-            {isEdit ? 'Modifica timbratura' : 'Nuova timbratura'}
+            {isEdit ? 'Modifica timbratura' : 'Aggiungi timbratura'}
           </h2>
           <button type="button" onClick={onClose}
             className="p-2 rounded-lg hover:bg-cream-100 text-warm-brown">
@@ -77,8 +107,8 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
 
         <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
           {!isEdit && (
-            <div className="bg-cream-50 border border-cream-300 rounded-xl px-4 py-3 font-sans text-xs text-warm-brown">
-              Le timbrature inserite manualmente non hanno coordinate GPS e vengono marchiate come <strong>MANUALE</strong>.
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 font-sans text-xs text-amber-800">
+              ℹ️ Le timbrature inserite manualmente non hanno coordinate GPS. Verranno marcate come "manuali" nella timeline.
             </div>
           )}
 
@@ -86,27 +116,36 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
             <select required value={form.staff_id}
               onChange={(e) => setForm({ ...form, staff_id: e.target.value })}
               disabled={isEdit}
-              className={`${inputCls} ${isEdit ? 'opacity-60 cursor-not-allowed' : ''}`}>
+              className={inputCls + (isEdit ? ' opacity-60 cursor-not-allowed' : '')}>
               <option value="">— Seleziona —</option>
               {staff.map((s) => (
                 <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>
               ))}
             </select>
+            {isEdit && (
+              <p className="font-sans text-xs text-warm-brown/70 mt-1">
+                Il dipendente non si può cambiare. Per spostare la timbratura, elimina e ricrea.
+              </p>
+            )}
           </Field>
 
           <Field label="Tipo evento" required>
             <div className="grid grid-cols-2 gap-2">
-              {EVENT_TYPES.map((t) => (
-                <button key={t.value} type="button"
-                  onClick={() => setForm({ ...form, event_type: t.value })}
-                  className={`px-3 py-2.5 rounded-xl border font-sans text-sm font-semibold transition ${
-                    form.event_type === t.value
-                      ? 'border-terracotta-400 bg-terracotta-50 text-warm-dark'
-                      : 'border-cream-300 bg-white text-warm-brown hover:bg-cream-50'
-                  }`}>
-                  {t.label}
-                </button>
-              ))}
+              {EVENT_TYPES.map((t) => {
+                const isSelected = form.event_type === t.value
+                return (
+                  <button key={t.value} type="button"
+                    onClick={() => setForm({ ...form, event_type: t.value })}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl font-sans text-sm font-semibold border transition ${
+                      isSelected
+                        ? 'border-terracotta-400 bg-terracotta-50 text-warm-dark'
+                        : 'border-cream-300 bg-white text-warm-brown hover:border-terracotta-200'
+                    }`}>
+                    <t.Icon size={16} />
+                    {t.label}
+                  </button>
+                )
+              })}
             </div>
           </Field>
 
@@ -117,7 +156,7 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
                 className={inputCls} />
             </Field>
             <Field label="Ora" required>
-              <input type="time" required step="60" value={form.time}
+              <input type="time" required value={form.time}
                 onChange={(e) => setForm({ ...form, time: e.target.value })}
                 className={inputCls} />
             </Field>
@@ -126,7 +165,7 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
           <Field label="Note (opzionale)">
             <input type="text" value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              placeholder="es. ha dimenticato di timbrare uscita"
+              placeholder="es. dimenticata timbra uscita, correzione manuale..."
               className={inputCls} />
           </Field>
 
@@ -161,43 +200,6 @@ export default function TimeEntryFormModal({ entry, presetStaffId, staff, onClos
   )
 }
 
-// ---- Helpers ----
-
-function initialForm(entry, presetStaffId) {
-  if (entry) {
-    const t = new Date(entry.event_time)
-    return {
-      staff_id: entry.staff_id,
-      event_type: entry.event_type,
-      date: formatLocalDate(t),
-      time: formatLocalTime(t),
-      notes: entry.notes || '',
-    }
-  }
-  const now = new Date()
-  return {
-    staff_id: presetStaffId || '',
-    event_type: 'clock_in',
-    date: formatLocalDate(now),
-    time: formatLocalTime(now),
-    notes: '',
-  }
-}
-
-function formatLocalDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function formatLocalTime(d) {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-const EVENT_TYPES = [
-  { value: 'clock_in', label: 'Inizio turno' },
-  { value: 'clock_out', label: 'Fine turno' },
-  { value: 'break_start', label: 'Inizio pausa' },
-  { value: 'break_end', label: 'Fine pausa' },
-]
-
 const inputCls =
   'w-full px-3 py-2.5 rounded-xl border border-cream-300 bg-white font-sans text-sm text-warm-dark focus:outline-none focus:border-terracotta-400 focus:ring-2 focus:ring-terracotta-100 transition'
 
@@ -210,4 +212,11 @@ function Field({ label, required, children }) {
       {children}
     </div>
   )
+}
+
+function pad2(n) { return String(n).padStart(2, '0') }
+
+// Restituisce YYYY-MM-DD nel timezone locale (NON in UTC)
+function toDateInputValue(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }

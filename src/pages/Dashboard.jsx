@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { startOfMonth, addMonths, addDays, isToday, isTomorrow, isYesterday } from 'date-fns'
 import { startOfWeek, formatDateISO } from '../lib/dateUtils'
 import ShiftCompanions from '../components/ShiftCompanions'
+import ManagerTodos from '../components/ManagerTodos'
 import {
   Calendar, Clock as ClockIcon, Palmtree, ArrowRight, AlertCircle,
   ArrowLeftRight, MapPin, Sparkles, CheckCircle2,
@@ -272,31 +273,8 @@ function ManagerDashboard({ profile }) {
         <h1 className="text-4xl text-warm-dark">{profile?.first_name}</h1>
       </div>
 
-      {/* Banner riassuntivo richieste pending */}
-      {totalPending > 0 && (
-        <div className="flex flex-col sm:flex-row gap-3">
-          {stats.pendingLeaves > 0 && (
-            <Link to="/leaves"
-              className="flex-1 flex items-center gap-3 bg-amber-50 border border-amber-300 hover:border-amber-400 rounded-xl px-5 py-3 transition group">
-              <AlertCircle size={18} className="text-amber-600 flex-shrink-0" />
-              <div className="font-sans text-sm text-amber-900 flex-1">
-                <strong>{stats.pendingLeaves}</strong> {stats.pendingLeaves === 1 ? 'richiesta ferie' : 'richieste ferie'} da approvare
-              </div>
-              <ArrowRight size={16} className="text-amber-700 group-hover:translate-x-0.5 transition" />
-            </Link>
-          )}
-          {stats.pendingSwaps > 0 && (
-            <Link to="/swaps"
-              className="flex-1 flex items-center gap-3 bg-amber-50 border border-amber-300 hover:border-amber-400 rounded-xl px-5 py-3 transition group">
-              <AlertCircle size={18} className="text-amber-600 flex-shrink-0" />
-              <div className="font-sans text-sm text-amber-900 flex-1">
-                <strong>{stats.pendingSwaps}</strong> {stats.pendingSwaps === 1 ? 'scambio' : 'scambi'} da approvare
-              </div>
-              <ArrowRight size={16} className="text-amber-700 group-hover:translate-x-0.5 transition" />
-            </Link>
-          )}
-        </div>
-      )}
+      {/* Cose da fare - sezione completa */}
+      <ManagerTodos />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <KpiCard to="/planning" icon={<Calendar size={18} />}
