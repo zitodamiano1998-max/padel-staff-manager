@@ -11,9 +11,10 @@ import ShiftFormModal from '../components/ShiftFormModal'
 import TemplatesModal from '../components/TemplatesModal'
 import CopyWeekModal from '../components/CopyWeekModal'
 import ShiftCompanions from '../components/ShiftCompanions'
+import EventsModal from '../components/EventsModal'
 import {
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Grid3x3, BookCopy, AlertTriangle,
-  Send, Pencil, Eye, Copy,
+  Send, Pencil, Eye, Copy, Sparkles,
 } from 'lucide-react'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -42,6 +43,8 @@ export default function Planning() {
   const [presetCell, setPresetCell] = useState(null)
   const [templatesModalOpen, setTemplatesModalOpen] = useState(false)
   const [copyWeekModalOpen, setCopyWeekModalOpen] = useState(false)
+  const [eventsModalOpen, setEventsModalOpen] = useState(false)
+  const [events, setEvents] = useState([])
   const [toast, setToast] = useState(null)
 
   // Modalità batch publish
@@ -73,7 +76,7 @@ export default function Planning() {
     const weekStartDate = formatDateISO(weekStart)
     const weekEndDate = formatDateISO(addDays(weekStart, 7))
 
-    const [staffRes, rolesRes, shiftsRes, templatesRes, availRes, leavesRes] = await Promise.all([
+    const [staffRes, rolesRes, shiftsRes, templatesRes, availRes, leavesRes, eventsRes] = await Promise.all([
       supabase
         .from('staff_members')
         .select('id, first_name, last_name, role_id, is_manager, roles(id, name, color)')
@@ -105,6 +108,13 @@ export default function Planning() {
         .eq('status', 'approved')
         .lt('start_date', weekEndDate)
         .gte('end_date', weekStartDate),
+      // Eventi che si sovrappongono alla settimana (start <= weekEnd, end >= weekStart)
+      supabase
+        .from('events')
+        .select('id, name, start_date, end_date, color, notes')
+        .lte('start_date', weekEndDate)
+        .gte('end_date', weekStartDate)
+        .order('start_date'),
     ])
     if (!staffRes.error) setStaff(staffRes.data || [])
     if (!rolesRes.error) setRoles(rolesRes.data || [])
@@ -112,6 +122,7 @@ export default function Planning() {
     if (!templatesRes.error) setTemplates(templatesRes.data || [])
     if (!availRes.error) setAvailability(availRes.data || [])
     if (!leavesRes.error) setApprovedLeaves(leavesRes.data || [])
+    if (!eventsRes.error) setEvents(eventsRes.data || [])
     setLoading(false)
   }
 
@@ -358,6 +369,7 @@ export default function Planning() {
         weekStart={weekStart}
         myShifts={shifts.filter((s) => s.staff_id === profile?.id && s.status !== 'cancelled')}
         approvedLeaves={approvedLeaves.filter((l) => l.staff_id === profile?.id)}
+        events={events}
         loading={loading}
         onPrev={goPrev}
         onNext={goNext}
@@ -417,6 +429,12 @@ export default function Planning() {
             className="flex items-center gap-2 border border-cream-300 hover:bg-cream-100 text-warm-dark font-sans font-semibold px-4 py-2 rounded-xl transition"
             title="Copia turni di una settimana in altre">
             <Copy size={16} /> Copia turni
+          </button>
+
+          <button onClick={() => setEventsModalOpen(true)}
+            className="flex items-center gap-2 border border-cream-300 hover:bg-cream-100 text-warm-dark font-sans font-semibold px-4 py-2 rounded-xl transition"
+            title="Gestisci eventi e tornei">
+            <Sparkles size={16} /> Eventi
           </button>
 
           {/* Toggle modalità Edit (silenzia push) */}
@@ -488,6 +506,7 @@ export default function Planning() {
             staff={staff}
             shiftsByStaffDay={shiftsByStaffDay}
             conflictsByShift={conflictsByShift}
+            events={events}
             onCellClick={handleCellClick}
             onShiftClick={handleShiftClick}
             isManager={isManager}
@@ -546,6 +565,13 @@ export default function Planning() {
             showToast(msg)
             fetchData()
           }}
+        />
+      )}
+
+      {eventsModalOpen && (
+        <EventsModal
+          onClose={() => setEventsModalOpen(false)}
+          onUpdate={fetchData}
         />
       )}
 
@@ -632,7 +658,7 @@ const TIMELINE_END_HOUR = 24
 const HOUR_HEIGHT = 60 // px per ora
 const TIME_COL_WIDTH = 64 // px
 
-function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, onCellClick, onShiftClick, isManager }) {
+function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, events = [], onCellClick, onShiftClick, isManager }) {
   // Costruisco lista turni per giorno (tutti i dipendenti insieme)
   const shiftsByDay = useMemo(() => {
     const map = new Map()
@@ -659,6 +685,9 @@ function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, onCellC
     <div className="bg-white rounded-2xl border border-cream-300 overflow-hidden">
       <div className="overflow-x-auto">
         <div className="min-w-[900px]">
+          {/* Banda eventi */}
+          <EventsBanner days={days} events={events} timeColWidth={TIME_COL_WIDTH} />
+
           {/* Header dei giorni */}
           <div className="grid sticky top-0 z-20 bg-white"
             style={{ gridTemplateColumns: `${TIME_COL_WIDTH}px repeat(7, 1fr)` }}>
@@ -1129,7 +1158,7 @@ function DailyShiftRow({ shift, onClick }) {
 // ============================================================================
 // VISTA DIPENDENTE — calendario settimanale personale read-only
 // ============================================================================
-function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, loading, onPrev, onNext, onToday }) {
+function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, events = [], loading, onPrev, onNext, onToday }) {
   const [selectedShift, setSelectedShift] = useState(null)
 
   // Statistiche settimana
@@ -1218,6 +1247,15 @@ function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, loadi
         <StatBox label="Turni questa settimana" value={weekStats.count} />
         <StatBox label="Ore totali" value={weekStats.totalHours.toFixed(1)} />
       </div>
+
+      {/* Eventi della settimana */}
+      {events.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {events.map((ev) => (
+            <EventCard key={ev.id} event={ev} />
+          ))}
+        </div>
+      )}
 
       {/* Calendario settimanale */}
       {loading ? (
@@ -1497,6 +1535,84 @@ function DetailRow({ label, children }) {
     <div>
       <div className="font-sans text-xs uppercase tracking-wider text-warm-brown mb-1">{label}</div>
       <div>{children}</div>
+    </div>
+  )
+}
+
+// ============================================================================
+// EVENTS BANNER (sopra header griglia settimana)
+// Per ogni evento sovrapposto alla settimana, una banda colorata che copre
+// le colonne dei giorni interessati con il nome al centro.
+// ============================================================================
+function EventsBanner({ days, events, timeColWidth }) {
+  if (!events || events.length === 0) return null
+
+  // Per ogni evento, calcolo gli indici dei giorni (0-6) coperti
+  const bands = events.map((ev) => {
+    const [sy, sm, sd] = ev.start_date.split('-').map(Number)
+    const [ey, em, ed] = ev.end_date.split('-').map(Number)
+    const evStart = new Date(sy, sm - 1, sd)
+    const evEnd = new Date(ey, em - 1, ed)
+    let firstIdx = -1, lastIdx = -1
+    days.forEach((d, i) => {
+      const dDate = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+      if (dDate >= evStart && dDate <= evEnd) {
+        if (firstIdx === -1) firstIdx = i
+        lastIdx = i
+      }
+    })
+    if (firstIdx === -1) return null
+    return { ev, firstIdx, lastIdx, span: lastIdx - firstIdx + 1 }
+  }).filter(Boolean)
+
+  if (bands.length === 0) return null
+
+  return (
+    <div className="border-b border-cream-300 bg-cream-50 py-1.5 px-1"
+      style={{ paddingLeft: timeColWidth + 4 }}>
+      <div className="grid gap-1" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        {bands.map((b, i) => (
+          <div key={b.ev.id + '-' + i}
+            className="rounded px-2 py-1 font-sans text-xs font-semibold truncate text-white shadow-sm"
+            style={{
+              backgroundColor: b.ev.color,
+              gridColumnStart: b.firstIdx + 1,
+              gridColumnEnd: `span ${b.span}`,
+            }}
+            title={b.ev.notes ? `${b.ev.name}\n\n${b.ev.notes}` : b.ev.name}>
+            ✦ {b.ev.name}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// EVENT CARD (per vista dipendente: card colorata)
+// ============================================================================
+function EventCard({ event }) {
+  const fmt = (iso) => {
+    const [y, m, d] = iso.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })
+  }
+  return (
+    <div className="rounded-xl px-4 py-3 shadow-sm flex items-start gap-3"
+      style={{ backgroundColor: event.color + '22', borderLeft: `4px solid ${event.color}` }}>
+      <div className="flex-1 min-w-0">
+        <div className="font-sans text-sm font-bold text-warm-dark">
+          ✦ {event.name}
+        </div>
+        <div className="font-sans text-xs text-warm-brown mt-0.5">
+          {fmt(event.start_date)}
+          {event.start_date !== event.end_date && ` → ${fmt(event.end_date)}`}
+        </div>
+        {event.notes && (
+          <div className="font-sans text-xs text-warm-brown italic mt-1">
+            {event.notes}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
