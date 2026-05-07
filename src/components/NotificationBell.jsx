@@ -379,6 +379,12 @@ const ICONS = {
   // Documenti
   document_uploaded: { El: FolderOpen, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
   document_received: { El: FileText, bg: 'bg-sage-100', fg: 'text-sage-700' },
+  // Manager-only
+  manager_todos_summary: { El: AlertCircle, bg: 'bg-terracotta-100', fg: 'text-terracotta-700' },
+  manager_missing_clocks: { El: ClockIcon, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  manager_empty_weeks: { El: Calendar, bg: 'bg-amber-100', fg: 'text-amber-700' },
+  manager_conflict_detected: { El: AlertCircle, bg: 'bg-red-100', fg: 'text-red-700' },
+  manager_missing_clockin_today: { El: ClockIcon, bg: 'bg-red-100', fg: 'text-red-700' },
   // Default
   default: { El: Bell, bg: 'bg-cream-200', fg: 'text-warm-brown' },
 }
