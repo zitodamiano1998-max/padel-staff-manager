@@ -203,6 +203,7 @@ function ManagerDashboard({ profile }) {
     pendingSwaps: null,
     activeStaff: null,
     publishedShiftsWeek: null,
+    upcomingShifts: [],
   })
   const [loading, setLoading] = useState(true)
 
@@ -219,7 +220,7 @@ function ManagerDashboard({ profile }) {
     const monthStart = startOfMonth(now)
     const monthEnd = startOfMonth(addMonths(now, 1))
 
-    const [shiftsRes, weekTeamShiftsRes, entriesRes, leavesRes, swapsRes, staffRes] = await Promise.all([
+    const [shiftsRes, weekTeamShiftsRes, entriesRes, leavesRes, swapsRes, staffRes, myUpcomingRes] = await Promise.all([
       supabase.from('shifts')
         .select('id', { count: 'exact', head: true })
         .eq('staff_id', profile.id)
@@ -246,6 +247,14 @@ function ManagerDashboard({ profile }) {
       supabase.from('staff_members')
         .select('id', { count: 'exact', head: true })
         .eq('is_active', true),
+      // I prossimi turni del manager (solo i suoi)
+      supabase.from('shifts')
+        .select('id, start_at, end_at, status, roles(name, color)')
+        .eq('staff_id', profile.id)
+        .gte('start_at', now.toISOString())
+        .neq('status', 'cancelled')
+        .order('start_at', { ascending: true })
+        .limit(5),
     ])
 
     const hoursThisMonth = entriesRes.data
@@ -259,6 +268,7 @@ function ManagerDashboard({ profile }) {
       pendingSwaps: swapsRes.count ?? 0,
       activeStaff: staffRes.count ?? 0,
       publishedShiftsWeek: weekTeamShiftsRes.count ?? 0,
+      upcomingShifts: myUpcomingRes.data || [],
     })
     setLoading(false)
   }
@@ -290,6 +300,11 @@ function ManagerDashboard({ profile }) {
           value={loading ? '—' : `${stats.hoursThisMonth.toFixed(1)}h`}
           ctaLabel="Riepilogo" />
       </div>
+
+      {/* I tuoi prossimi turni (solo i turni del manager) */}
+      {stats.upcomingShifts.length > 0 && (
+        <UpcomingShiftsList shifts={stats.upcomingShifts} />
+      )}
 
       {/* Profilo */}
       <div className="bg-white rounded-2xl border border-cream-300 p-6">
