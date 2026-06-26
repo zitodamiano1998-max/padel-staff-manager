@@ -950,14 +950,14 @@ function ShiftBlockTimeline({ shift, top, height, leftPct, widthPct, isDraggable
         left: `calc(${leftPct}% + 2px)`,
         width: `calc(${widthPct}% - 4px)`,
         height: `${Math.max(height, 24)}px`,
-        backgroundColor: isDraft ? 'transparent' : color + 'CC',
+        backgroundColor: isDraft ? color + 'B3' : color + 'CC',
         border: isDraft
           ? `2px dashed ${color}`
           : (hasErrorConflict ? `2px solid #DC2626` : `1px solid ${color}`),
         boxShadow: hasErrorConflict ? 'inset 0 0 0 2px rgba(220, 38, 38, 0.3)' : undefined,
         transform: transformStyle,
       }}>
-      <div className={`w-full h-full px-2 py-1 ${isDraft ? 'text-warm-dark' : 'text-white'} flex flex-col justify-start overflow-hidden`}>
+      <div className={`w-full h-full px-2 py-1 text-white flex flex-col justify-start overflow-hidden`}>
         <div className="font-sans text-[11px] font-semibold tabular-nums leading-tight">
           {formatTimeFromISO(shift.start_at)}–{formatTimeFromISO(shift.end_at)}
         </div>
@@ -967,7 +967,7 @@ function ShiftBlockTimeline({ shift, top, height, leftPct, widthPct, isDraggable
           </div>
         )}
         {height >= 50 && shift.roles?.name && (
-          <div className={`font-sans text-[10px] truncate leading-tight opacity-90 ${isDraft ? 'text-warm-brown' : ''}`}>
+          <div className={`font-sans text-[10px] truncate leading-tight opacity-90`}>
             {shift.roles.name}
           </div>
         )}
@@ -1094,7 +1094,7 @@ function ShiftBlockGhost({ shift, staffColorMap }) {
   const overnight = shiftCrossesMidnight(shift.start_at, shift.end_at)
 
   const blockStyle = isDraft
-    ? { backgroundColor: color + '0F', border: `1.5px dashed ${color}` }
+    ? { backgroundColor: color + '33', border: `1.5px dashed ${color}` }
     : { backgroundColor: color + '33', borderLeft: `4px solid ${color}` }
 
   return (
