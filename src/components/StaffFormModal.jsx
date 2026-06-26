@@ -20,9 +20,25 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
     fiscal_code: '',
     iban: '',
     notes: '',
+    notify_partner_id: '',
   })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+  const [partnerOptions, setPartnerOptions] = useState([])
+
+  // Lista dipendenti per il campo "Notifiche anche a…" (solo in modifica)
+  useEffect(() => {
+    if (!isEdit || !staff?.id) return
+    let active = true
+    supabase
+      .from('staff_members')
+      .select('id, first_name, last_name')
+      .eq('is_active', true)
+      .neq('id', staff.id)
+      .order('first_name')
+      .then(({ data }) => { if (active) setPartnerOptions(data || []) })
+    return () => { active = false }
+  }, [isEdit, staff?.id])
 
   useEffect(() => {
     if (staff) {
@@ -41,6 +57,7 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
         fiscal_code: staff.fiscal_code || '',
         iban: staff.iban || '',
         notes: staff.notes || '',
+        notify_partner_id: staff.notify_partner_id || '',
       })
     }
   }, [staff])
@@ -71,6 +88,7 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
           fiscal_code: form.fiscal_code?.trim() || null,
           iban: form.iban?.trim() || null,
           notes: form.notes?.trim() || null,
+          notify_partner_id: form.notify_partner_id || null,
         }
         const { error } = await supabase
           .from('staff_members')
@@ -255,6 +273,20 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
                 style={{ textTransform: 'uppercase' }} />
             </Field>
           </div>
+
+          {/* Notifiche anche a… (mirror notifiche) — solo in modifica */}
+          {isEdit && (
+            <Field label="Notifiche anche a…"
+              hint="Le notifiche di questo dipendente (turni, ferie, scambi…) arriveranno anche alla persona scelta. Utile per titolari che coprono lo stesso turno.">
+              <select value={form.notify_partner_id} onChange={update('notify_partner_id')}
+                className={inputCls}>
+                <option value="">— Nessuno —</option>
+                {partnerOptions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           {/* Note */}
           <Field label="Note">
