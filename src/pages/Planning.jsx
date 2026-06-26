@@ -14,7 +14,7 @@ import ShiftCompanions from '../components/ShiftCompanions'
 import EventsModal from '../components/EventsModal'
 import {
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Grid3x3, BookCopy, AlertTriangle,
-  Send, Pencil, Eye, Copy, Sparkles,
+  Send, Pencil, Eye, Copy, Sparkles, Users,
 } from 'lucide-react'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -67,6 +67,11 @@ export default function Planning() {
   const [approvedLeaves, setApprovedLeaves] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Partner collegato: il collega che mi ha impostato come "notifica anche a"
+  // (es. Daniele → Giovanna). Giovanna vede i turni PUBBLICATI di Daniele nel
+  // proprio calendario, in sola lettura, marcati "(con Daniele)".
+  const [partner, setPartner] = useState(null) // { id, first_name } | null
+
   const [modalOpen, setModalOpen] = useState(false)
   const [editingShift, setEditingShift] = useState(null)
   const [presetCell, setPresetCell] = useState(null)
@@ -93,6 +98,24 @@ export default function Planning() {
   useEffect(() => {
     fetchData()
   }, [weekStart])
+
+  // Carica il partner collegato (chi mi ha come notify_partner_id). Una volta
+  // per utente: la relazione non cambia settimana per settimana. Se la RLS non
+  // restituisce la riga, partner resta null e semplicemente non si mostra nulla.
+  useEffect(() => {
+    if (!profile?.id) return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('staff_members')
+        .select('id, first_name')
+        .eq('notify_partner_id', profile.id)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (!cancelled) setPartner(data || null)
+    })()
+    return () => { cancelled = true }
+  }, [profile?.id])
 
   const fetchData = async () => {
     setLoading(true)
@@ -394,11 +417,19 @@ export default function Planning() {
   }, [shifts, viewMode, selectedDay])
 
   if (!isManager) {
+    // I turni pubblicati del partner sono già presenti in `shifts` (la policy
+    // RLS shifts_select lascia leggere a chiunque le righe status='published').
+    // Filtro solo quelli del partner collegato.
+    const partnerShifts = partner
+      ? shifts.filter((s) => s.staff_id === partner.id && s.status === 'published')
+      : []
     return (
       <EmployeePlanningView
         days={days}
         weekStart={weekStart}
         myShifts={shifts.filter((s) => s.staff_id === profile?.id && s.status !== 'cancelled')}
+        partnerShifts={partnerShifts}
+        partnerName={partner?.first_name || ''}
         approvedLeaves={approvedLeaves.filter((l) => l.staff_id === profile?.id)}
         events={events}
         loading={loading}
@@ -1193,10 +1224,10 @@ function DailyShiftRow({ shift, onClick, staffColorMap }) {
 // ============================================================================
 // VISTA DIPENDENTE — calendario settimanale personale read-only
 // ============================================================================
-function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, events = [], loading, onPrev, onNext, onToday }) {
+function EmployeePlanningView({ days, weekStart, myShifts, partnerShifts = [], partnerName = '', approvedLeaves, events = [], loading, onPrev, onNext, onToday }) {
   const [selectedShift, setSelectedShift] = useState(null)
 
-  // Statistiche settimana
+  // Statistiche settimana — SOLO turni propri (le ore del partner non sono sue)
   const weekStats = useMemo(() => {
     let totalHours = 0
     let count = 0
@@ -1213,7 +1244,7 @@ function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, event
     return { totalHours, count }
   }, [myShifts, days])
 
-  // Trova prossimo turno futuro (anche fuori dalla settimana visualizzata)
+  // Prossimo turno — SOLO turni propri (non il partner)
   const nextShift = useMemo(() => {
     const now = new Date()
     return myShifts
@@ -1221,7 +1252,9 @@ function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, event
       .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))[0]
   }, [myShifts])
 
-  // Raggruppa turni per giorno (key: YYYY-MM-DD)
+  // Raggruppa turni per giorno (key: YYYY-MM-DD). I turni propri e quelli del
+  // partner finiscono nello stesso giorno; i secondi sono taggati con _partner
+  // così i renderer li mostrano distinti e in sola lettura.
   const shiftsByDay = useMemo(() => {
     const map = new Map()
     myShifts.forEach((s) => {
@@ -1229,8 +1262,17 @@ function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, event
       if (!map.has(key)) map.set(key, [])
       map.get(key).push(s)
     })
+    partnerShifts.forEach((s) => {
+      const key = startDateOfShift(s.start_at)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push({ ...s, _partner: true })
+    })
+    // Ordina ogni giorno per orario di inizio
+    for (const arr of map.values()) {
+      arr.sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
+    }
     return map
-  }, [myShifts])
+  }, [myShifts, partnerShifts])
 
   // Mappa ferie approvate per giorno
   const leavesByDay = useMemo(() => {
@@ -1307,6 +1349,7 @@ function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, event
                 day={day}
                 shifts={dayShifts}
                 leave={dayLeave}
+                partnerName={partnerName}
                 onShiftClick={setSelectedShift}
               />
             )
@@ -1318,6 +1361,7 @@ function EmployeePlanningView({ days, weekStart, myShifts, approvedLeaves, event
       {selectedShift && (
         <ShiftDetailModal
           shift={selectedShift}
+          partnerName={selectedShift._partner ? partnerName : null}
           onClose={() => setSelectedShift(null)}
         />
       )}
@@ -1386,7 +1430,7 @@ function NextShiftCard({ shift }) {
   )
 }
 
-function DayRow({ day, shifts, leave, onShiftClick }) {
+function DayRow({ day, shifts, leave, partnerName, onShiftClick }) {
   const today = isToday(day)
   const isPast = !today && day < new Date(new Date().setHours(0, 0, 0, 0))
   // formatDayHeader ritorna "Lun 27", quindi splitto per separare nome e numero
@@ -1426,7 +1470,7 @@ function DayRow({ day, shifts, leave, onShiftClick }) {
           ) : (
             <div className="space-y-2">
               {shifts.map((s) => (
-                <ShiftBar key={s.id} shift={s} onClick={() => onShiftClick(s)} />
+                <ShiftBar key={s.id} shift={s} partnerName={partnerName} onClick={() => onShiftClick(s)} />
               ))}
             </div>
           )}
@@ -1436,12 +1480,34 @@ function DayRow({ day, shifts, leave, onShiftClick }) {
   )
 }
 
-function ShiftBar({ shift, onClick }) {
+function ShiftBar({ shift, onClick, partnerName }) {
   const color = shift.roles?.color || '#C97D60'
   const start = new Date(shift.start_at)
   const end = new Date(shift.end_at)
   const hours = ((end - start) / 3600000 - (shift.break_minutes || 0) / 60).toFixed(1)
   const isDraft = shift.status === 'draft'
+
+  // Turno del partner: stile distinto (sage), badge "con {nome}", sola lettura.
+  if (shift._partner) {
+    return (
+      <button onClick={onClick}
+        className="w-full text-left rounded-xl px-3 py-2.5 transition hover:shadow-sm flex items-center gap-3 border border-dashed border-sage-300 bg-sage-50/70">
+        <div className="w-1 self-stretch rounded-full flex-shrink-0 bg-sage-400" />
+        <div className="flex-1 min-w-0">
+          <div className="font-sans text-sm font-semibold text-warm-dark tabular-nums">
+            {formatTimeFromISO(shift.start_at)} – {formatTimeFromISO(shift.end_at)}
+          </div>
+          <div className="font-sans text-xs text-warm-brown">
+            {hours}h
+            {shift.roles?.name && ` · ${shift.roles.name}`}
+          </div>
+        </div>
+        <span className="font-sans text-[10px] uppercase tracking-wider font-semibold text-sage-700 bg-white border border-sage-200 px-2 py-0.5 rounded-md flex-shrink-0 flex items-center gap-1">
+          <Users size={11} /> con {partnerName}
+        </span>
+      </button>
+    )
+  }
 
   return (
     <button onClick={onClick}
@@ -1490,7 +1556,7 @@ function LeaveBadge({ leave }) {
   )
 }
 
-function ShiftDetailModal({ shift, onClose }) {
+function ShiftDetailModal({ shift, onClose, partnerName = null }) {
   const start = new Date(shift.start_at)
   const end = new Date(shift.end_at)
   const hours = ((end - start) / 3600000 - (shift.break_minutes || 0) / 60).toFixed(1)
@@ -1512,6 +1578,14 @@ function ShiftDetailModal({ shift, onClose }) {
           </button>
         </div>
         <div className="px-6 py-5 space-y-4">
+          {partnerName && (
+            <div className="flex items-center gap-2 bg-sage-50 border border-sage-200 rounded-xl px-3 py-2 -mt-1">
+              <Users size={15} className="text-sage-700 flex-shrink-0" />
+              <span className="font-sans text-sm text-sage-800">
+                Turno di <strong>{partnerName}</strong> · lo vedi perché sei collegato/a. Sola lettura.
+              </span>
+            </div>
+          )}
           <DetailRow label="Orario">
             <span className="font-sans text-base font-semibold text-warm-dark tabular-nums">
               {formatTimeFromISO(shift.start_at)} – {formatTimeFromISO(shift.end_at)}
