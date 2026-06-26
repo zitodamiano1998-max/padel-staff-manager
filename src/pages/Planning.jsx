@@ -22,6 +22,35 @@ import {
 } from '@dnd-kit/core'
 import { findShiftConflicts, hasBlockingConflicts } from '../lib/conflictUtils'
 
+// ============================================================================
+// COLORE PER DIPENDENTE (vista manager)
+// Palette fissa di 12 tinte distinte, abbastanza scure per testo bianco.
+// La mappa assegna i colori per indice -> zero collisioni fino a 12 persone.
+// colorForStaff() è il fallback puro (hash) se la mappa non è disponibile.
+// ============================================================================
+const STAFF_PALETTE = [
+  '#C2410C', '#B45309', '#A16207', '#4D7C0F',
+  '#15803D', '#0F766E', '#0E7490', '#1D4ED8',
+  '#4338CA', '#7E22CE', '#BE185D', '#9F1239',
+]
+
+function colorForStaff(staffId) {
+  if (!staffId) return '#C97D60'
+  const s = String(staffId)
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0
+  return STAFF_PALETTE[h % STAFF_PALETTE.length]
+}
+
+// Mappa stabile staff_id -> colore. Ordino per id così l'assegnazione è
+// deterministica a prescindere dall'ordine di fetch.
+function buildStaffColorMap(staff = []) {
+  const map = {}
+  const ordered = [...staff].sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  ordered.forEach((m, i) => { map[m.id] = STAFF_PALETTE[i % STAFF_PALETTE.length] })
+  return map
+}
+
 export default function Planning() {
   const { profile } = useAuth()
   const isManager = profile?.is_manager
@@ -347,6 +376,8 @@ export default function Planning() {
     }
   }
 
+  const staffColorMap = useMemo(() => buildStaffColorMap(staff), [staff])
+
   const stats = useMemo(() => {
     const target = viewMode === 'day' ? formatDateISO(selectedDay) : null
     const list = target
@@ -507,18 +538,20 @@ export default function Planning() {
             shiftsByStaffDay={shiftsByStaffDay}
             conflictsByShift={conflictsByShift}
             events={events}
+            staffColorMap={staffColorMap}
             onCellClick={handleCellClick}
             onShiftClick={handleShiftClick}
             isManager={isManager}
           />
           <DragOverlay dropAnimation={null}>
-            {activeShift ? <ShiftBlockGhost shift={activeShift} /> : null}
+            {activeShift ? <ShiftBlockGhost shift={activeShift} staffColorMap={staffColorMap} /> : null}
           </DragOverlay>
         </DndContext>
       ) : (
         <DailyAgenda
           day={selectedDay}
           shifts={shifts.filter((s) => startDateOfShift(s.start_at) === formatDateISO(selectedDay))}
+          staffColorMap={staffColorMap}
           onShiftClick={handleShiftClick}
           onAddClick={() => handleCellClick(null, selectedDay)}
         />
@@ -658,7 +691,7 @@ const TIMELINE_END_HOUR = 24
 const HOUR_HEIGHT = 60 // px per ora
 const TIME_COL_WIDTH = 64 // px
 
-function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, events = [], onCellClick, onShiftClick, isManager }) {
+function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, events = [], staffColorMap, onCellClick, onShiftClick, isManager }) {
   // Costruisco lista turni per giorno (tutti i dipendenti insieme)
   const shiftsByDay = useMemo(() => {
     const map = new Map()
@@ -737,6 +770,7 @@ function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, events 
                   shifts={dayShifts}
                   conflictsByShift={conflictsByShift}
                   isManager={isManager}
+                  staffColorMap={staffColorMap}
                   onShiftClick={onShiftClick}
                   onEmptyClick={(hour, minute) => {
                     // L'utente ha cliccato su uno spot vuoto: chiamo onCellClick con preset orario
@@ -751,7 +785,7 @@ function PlanningGrid({ days, staff, shiftsByStaffDay, conflictsByShift, events 
   )
 }
 
-function DayColumn({ day, dateISO, shifts, conflictsByShift, isManager, onShiftClick, onEmptyClick }) {
+function DayColumn({ day, dateISO, shifts, conflictsByShift, isManager, staffColorMap, onShiftClick, onEmptyClick }) {
   // Gestisco droppable dell'intera colonna giorno
   const { setNodeRef, isOver } = useDroppable({
     id: `day-${dateISO}`,
@@ -797,6 +831,7 @@ function DayColumn({ day, dateISO, shifts, conflictsByShift, isManager, onShiftC
           leftPct={leftPct}
           widthPct={widthPct}
           isDraggable={isManager}
+          staffColorMap={staffColorMap}
           conflicts={conflictsByShift?.get(shift.id) || []}
           onClick={(e) => onShiftClick(e, shift)} />
       ))}
@@ -883,7 +918,7 @@ function positionShifts(shifts, dateISO) {
   }))
 }
 
-function ShiftBlockTimeline({ shift, top, height, leftPct, widthPct, isDraggable, conflicts, onClick }) {
+function ShiftBlockTimeline({ shift, top, height, leftPct, widthPct, isDraggable, conflicts, onClick, staffColorMap }) {
   const {
     attributes, listeners, setNodeRef: setDragRef, transform, isDragging,
   } = useDraggable({
@@ -892,7 +927,7 @@ function ShiftBlockTimeline({ shift, top, height, leftPct, widthPct, isDraggable
     data: { shift },
   })
 
-  const color = shift.roles?.color || '#C97D60'
+  const color = staffColorMap?.[shift.staff_id] || colorForStaff(shift.staff_id)
   const isDraft = shift.status === 'draft'
   const hasErrorConflict = conflicts.some((c) => c.severity === 'error')
   const sm = shift.staff_members
@@ -969,14 +1004,14 @@ function DroppableCell({ staffId, dateISO, isManager, isToday, onClick, children
   )
 }
 
-function ShiftBlock({ shift, onClick, isDraggable = false, conflicts = [] }) {
+function ShiftBlock({ shift, onClick, isDraggable = false, conflicts = [], staffColorMap }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: shift.id,
     data: { shift },
     disabled: !isDraggable,
   })
 
-  const color = shift.roles?.color || '#C97D60'
+  const color = staffColorMap?.[shift.staff_id] || colorForStaff(shift.staff_id)
   const isDraft = shift.status === 'draft'
   const startTime = formatTimeFromISO(shift.start_at)
   const endTime = formatTimeFromISO(shift.end_at)
@@ -1051,8 +1086,8 @@ function ShiftBlock({ shift, onClick, isDraggable = false, conflicts = [] }) {
 }
 
 // Versione "ghost" mostrata nel DragOverlay mentre trascini (no listeners, solo aspetto)
-function ShiftBlockGhost({ shift }) {
-  const color = shift.roles?.color || '#C97D60'
+function ShiftBlockGhost({ shift, staffColorMap }) {
+  const color = staffColorMap?.[shift.staff_id] || colorForStaff(shift.staff_id)
   const isDraft = shift.status === 'draft'
   const startTime = formatTimeFromISO(shift.start_at)
   const endTime = formatTimeFromISO(shift.end_at)
@@ -1076,7 +1111,7 @@ function ShiftBlockGhost({ shift }) {
   )
 }
 
-function DailyAgenda({ day, shifts, onShiftClick, onAddClick }) {
+function DailyAgenda({ day, shifts, onShiftClick, onAddClick, staffColorMap }) {
   const sorted = [...shifts].sort((a, b) => a.start_at.localeCompare(b.start_at))
   const totalHours = sorted.reduce(
     (acc, s) => acc + calcHoursFromTimestamps(s.start_at, s.end_at, s.break_minutes), 0
@@ -1106,7 +1141,7 @@ function DailyAgenda({ day, shifts, onShiftClick, onAddClick }) {
       ) : (
         <div className="divide-y divide-cream-200">
           {sorted.map((shift) => (
-            <DailyShiftRow key={shift.id} shift={shift} onClick={(e) => onShiftClick(e, shift)} />
+            <DailyShiftRow key={shift.id} shift={shift} staffColorMap={staffColorMap} onClick={(e) => onShiftClick(e, shift)} />
           ))}
         </div>
       )}
@@ -1114,8 +1149,8 @@ function DailyAgenda({ day, shifts, onShiftClick, onAddClick }) {
   )
 }
 
-function DailyShiftRow({ shift, onClick }) {
-  const color = shift.roles?.color || '#C97D60'
+function DailyShiftRow({ shift, onClick, staffColorMap }) {
+  const color = staffColorMap?.[shift.staff_id] || colorForStaff(shift.staff_id)
   const isDraft = shift.status === 'draft'
   const hours = calcHoursFromTimestamps(shift.start_at, shift.end_at, shift.break_minutes)
   const startTime = formatTimeFromISO(shift.start_at)
