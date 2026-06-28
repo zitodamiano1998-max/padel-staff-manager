@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import {
   LogOut, Users, LayoutDashboard, Calendar, Moon,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
-  Settings as SettingsIcon, CalendarPlus, FolderOpen, BarChart3,
+  Settings as SettingsIcon, CalendarPlus, FolderOpen, BarChart3, User,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import OnboardingWizard from './OnboardingWizard'
@@ -115,14 +115,19 @@ export default function Layout({ children }) {
           </nav>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="text-right hidden md:block">
-              <div className="font-sans text-sm font-semibold text-warm-dark leading-tight">
+            <Link to="/profilo" className="text-right hidden md:block group" title="Il tuo profilo">
+              <div className="font-sans text-sm font-semibold text-warm-dark leading-tight group-hover:text-terracotta-600 transition">
                 {profile?.first_name} {profile?.last_name}
               </div>
               <div className="font-sans text-xs text-warm-brown leading-tight mt-0.5">
                 {profile?.role_name}{profile?.is_manager && ' · Manager'}
               </div>
-            </div>
+            </Link>
+            <Link to="/profilo"
+              className="md:hidden p-2 rounded-lg hover:bg-cream-200 text-warm-brown hover:text-warm-dark transition"
+              title="Il tuo profilo">
+              <User size={18} />
+            </Link>
             <NotificationBell />
             <button onClick={handleLogout}
               className="p-2 rounded-lg hover:bg-cream-200 text-warm-brown hover:text-warm-dark transition"
