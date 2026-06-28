@@ -11,18 +11,70 @@ export default function AcceptInvite() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
+  // 'invalid' = nessun token nell'URL / link malformato
+  // 'expired' = c'era un token ma la verifica è fallita (scaduto o già usato)
+  const [failReason, setFailReason] = useState('invalid')
 
-  // Quando l'utente atterra dal link email, Supabase ha già impostato la sessione
+  // Quando l'utente atterra dal link, prova a stabilire la sessione in TUTTI i
+  // formati possibili, senza dipendere dall'auto-rilevamento del client.
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setChecking(false)
-    })
+    let cancelled = false
+
+    const acquireSession = async () => {
+      // 1. Sessione già pronta (auto-detect ha funzionato)?
+      const { data: { session: existing } } = await supabase.auth.getSession()
+      if (existing) return existing
+
+      const url = new URL(window.location.href)
+      const hash = new URLSearchParams(url.hash.replace(/^#/, ''))
+      const query = url.searchParams
+
+      // (a) Flusso implicit: #access_token & #refresh_token
+      const access_token = hash.get('access_token')
+      const refresh_token = hash.get('refresh_token')
+      if (access_token && refresh_token) {
+        const { data, error } = await supabase.auth.setSession({ access_token, refresh_token })
+        if (!error && data?.session) return data.session
+        setFailReason('expired')
+      }
+
+      // (b) Link email "token_hash + type": il più affidabile per i link generati lato server
+      const token_hash = query.get('token_hash') || hash.get('token_hash')
+      const type = query.get('type') || hash.get('type')
+      if (token_hash && type) {
+        const { data, error } = await supabase.auth.verifyOtp({ token_hash, type })
+        if (!error && data?.session) return data.session
+        setFailReason('expired')
+      }
+
+      // (c) Flusso PKCE: ?code=
+      const code = query.get('code')
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        if (!error && data?.session) return data.session
+        setFailReason('expired')
+      }
+
+      return null
+    }
+
+    acquireSession()
+      .then((s) => {
+        if (cancelled) return
+        setSession(s)
+        setChecking(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setFailReason('expired')
+        setSession(null)
+        setChecking(false)
+      })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => setSession(session)
+      (_event, session) => { if (!cancelled && session) setSession(session) }
     )
-    return () => subscription.unsubscribe()
+    return () => { cancelled = true; subscription.unsubscribe() }
   }, [])
 
   const handleSubmit = async (e) => {
@@ -62,14 +114,26 @@ export default function AcceptInvite() {
     return (
       <div className="min-h-screen bg-cream-100 flex items-center justify-center px-6">
         <div className="bg-white rounded-2xl border border-cream-300 p-8 max-w-md text-center shadow-sm">
-          <h1 className="text-2xl text-warm-dark mb-3">Link non valido</h1>
+          <h1 className="text-2xl text-warm-dark mb-3">
+            {failReason === 'expired' ? 'Link scaduto o già usato' : 'Link non valido'}
+          </h1>
           <p className="font-sans text-sm text-warm-brown leading-relaxed mb-6">
-            Il link di invito è scaduto o non è più valido.<br />
-            Chiedi al manager di rinviarti l'invito.
+            {failReason === 'expired' ? (
+              <>
+                Questo link funziona una sola volta e per un tempo limitato.<br />
+                Se hai già impostato la password, accedi normalmente dal login.
+                Altrimenti chiedi al manager un nuovo link.
+              </>
+            ) : (
+              <>
+                Il link di invito non è valido.<br />
+                Chiedi al manager di rinviarti l'invito.
+              </>
+            )}
           </p>
           <button onClick={() => navigate('/login')}
             className="text-terracotta-500 hover:text-terracotta-600 font-sans text-sm font-semibold">
-            ← Torna al login
+            ← Vai al login
           </button>
         </div>
       </div>
