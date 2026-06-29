@@ -73,9 +73,11 @@ export default function Layout({ children }) {
             <NavLink to="/dashboard" icon={<LayoutDashboard size={16} />} active={isActive('/dashboard')}>
               Dashboard
             </NavLink>
-            <NavLink to="/clock" icon={<ClockIcon size={16} />} active={isActive('/clock')}>
-              Timbra
-            </NavLink>
+            {!profile?.timbratura_esente && (
+              <NavLink to="/clock" icon={<ClockIcon size={16} />} active={isActive('/clock')}>
+                Timbra
+              </NavLink>
+            )}
             <NavLink to="/planning" icon={<Calendar size={16} />} active={isActive('/planning')}>
               Planning
             </NavLink>

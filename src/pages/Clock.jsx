@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import {
@@ -108,6 +109,13 @@ export default function Clock() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Gli esenti da timbratura non devono accedere a questa pagina: la voce è
+  // nascosta dal menu, ma /clock resta raggiungibile via URL o da vecchie
+  // notifiche. Li rimando alla dashboard. (Dopo gli hook, per non violarne le regole.)
+  if (profile?.timbratura_esente) {
+    return <Navigate to="/dashboard" replace />
   }
 
   return (

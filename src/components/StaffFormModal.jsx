@@ -21,6 +21,7 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
     iban: '',
     notes: '',
     notify_partner_id: '',
+    timbratura_esente: false,
   })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -58,6 +59,7 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
         iban: staff.iban || '',
         notes: staff.notes || '',
         notify_partner_id: staff.notify_partner_id || '',
+        timbratura_esente: staff.timbratura_esente || false,
       })
     }
   }, [staff])
@@ -89,6 +91,7 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
           iban: form.iban?.trim() || null,
           notes: form.notes?.trim() || null,
           notify_partner_id: form.notify_partner_id || null,
+          timbratura_esente: form.timbratura_esente,
         }
         const { error } = await supabase
           .from('staff_members')
@@ -286,6 +289,23 @@ export default function StaffFormModal({ staff, roles, onClose, onSaved, onError
                 ))}
               </select>
             </Field>
+          )}
+
+          {/* Esente da timbratura — solo in modifica */}
+          {isEdit && (
+            <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+              form.timbratura_esente ? 'border-terracotta-300 bg-terracotta-50' : 'border-cream-300 bg-white hover:border-terracotta-200'
+            }`}>
+              <input type="checkbox" checked={form.timbratura_esente}
+                onChange={(e) => setForm({ ...form, timbratura_esente: e.target.checked })}
+                className="mt-0.5 w-4 h-4 accent-terracotta-400" />
+              <div>
+                <div className="font-sans text-sm font-semibold text-warm-dark">Esente da timbratura</div>
+                <div className="font-sans text-xs text-warm-brown mt-0.5">
+                  Per titolari e soci sempre in sede. Non vedranno la sezione Timbra e non riceveranno promemoria di timbratura.
+                </div>
+              </div>
+            </label>
           )}
 
           {/* Note */}
