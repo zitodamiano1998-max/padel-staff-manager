@@ -9,7 +9,7 @@ import TimeEntryFormModal from '../components/TimeEntryFormModal'
 import {
   Calendar, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Edit, Trash2, Plus, AlertTriangle,
-  Play, Square, Coffee, Clock as ClockIcon, MapPin, Download,
+  Play, Square, Coffee, Clock as ClockIcon, MapPin, Download, CalendarX,
 } from 'lucide-react'
 
 export default function Timesheets() {
@@ -151,18 +151,21 @@ export default function Timesheets() {
   const globalStats = useMemo(() => {
     let totalMs = 0
     let outsideCount = 0
+    let outsideShiftCount = 0
     const activeStaff = new Set()
     for (const [sid, list] of entriesByStaff) {
       activeStaff.add(sid)
       totalMs += computeWorkedMs(list, new Date())
       list.forEach((e) => {
         if (e.is_within_geofence === false) outsideCount++
+        if (e.outside_shift === true) outsideShiftCount++
       })
     }
     return {
       totalHours: totalMs / 3600000,
       activeStaff: activeStaff.size,
       outsideCount,
+      outsideShiftCount,
     }
   }, [entriesByStaff])
 
@@ -300,12 +303,15 @@ export default function Timesheets() {
 
           {/* Stats */}
           {isManager ? (
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <StatBox label="Ore totali" value={globalStats.totalHours.toFixed(1)} />
               <StatBox label="Dipendenti attivi" value={globalStats.activeStaff} />
               <StatBox label="Eventi fuori area"
                 value={globalStats.outsideCount}
                 accent={globalStats.outsideCount > 0 ? 'red' : null} />
+              <StatBox label="Timbrature fuori turno"
+                value={globalStats.outsideShiftCount}
+                accent={globalStats.outsideShiftCount > 0 ? 'amber' : null} />
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 mb-6">
@@ -384,12 +390,18 @@ export default function Timesheets() {
 // ---- Sub components ----
 
 function StatBox({ label, value, accent }) {
+  const border =
+    accent === 'red' ? 'border-red-300 bg-red-50/30'
+    : accent === 'amber' ? 'border-amber-300 bg-amber-50/30'
+    : 'border-cream-300'
+  const valueColor =
+    accent === 'red' ? 'text-red-700'
+    : accent === 'amber' ? 'text-amber-700'
+    : 'text-warm-dark'
   return (
-    <div className={`bg-white rounded-2xl border p-5 ${
-      accent === 'red' ? 'border-red-300 bg-red-50/30' : 'border-cream-300'
-    }`}>
+    <div className={`bg-white rounded-2xl border p-5 ${border}`}>
       <div className="text-warm-brown font-sans text-xs uppercase tracking-wider mb-1">{label}</div>
-      <div className={`text-3xl font-serif font-semibold ${accent === 'red' ? 'text-red-700' : 'text-warm-dark'}`}>
+      <div className={`text-3xl font-serif font-semibold ${valueColor}`}>
         {value}
       </div>
     </div>
@@ -564,8 +576,19 @@ function EntryRow({ entry, onEdit, onDelete, canEdit = true }) {
           {isOutside && (
             <span className="ml-2 text-red-700 font-semibold">⚠ fuori area</span>
           )}
+          {entry.outside_shift === true && (
+            <span className="ml-2 text-amber-700 font-semibold">⚠ fuori turno</span>
+          )}
           {entry.notes && <span className="ml-2 italic">"{entry.notes}"</span>}
         </div>
+        {entry.outside_shift === true && entry.outside_shift_reason && (
+          <div className="mt-1 inline-flex items-start gap-1.5 px-2 py-1 rounded-lg bg-amber-50 border border-amber-200">
+            <CalendarX size={12} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <span className="font-sans text-xs text-amber-800">
+              <span className="font-semibold">Motivo:</span> {entry.outside_shift_reason}
+            </span>
+          </div>
+        )}
       </div>
       {canEdit && (
         <>

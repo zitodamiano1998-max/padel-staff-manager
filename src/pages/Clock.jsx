@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import {
-  Play, Pause, Square, Coffee, MapPin, AlertTriangle, CheckCircle2, Clock as ClockIcon, Loader2,
+  Play, Pause, Square, Coffee, MapPin, AlertTriangle, CheckCircle2, Clock as ClockIcon, Loader2, CalendarX,
 } from 'lucide-react'
 
 export default function Clock() {
@@ -17,6 +17,10 @@ export default function Clock() {
   const [success, setSuccess] = useState(null)
   const [now, setNow] = useState(new Date())
   const [lastDistance, setLastDistance] = useState(null) // metri dal centro dopo l'ultima timbra
+
+  // Popup "fuori turno": quando si timbra entrata senza un turno nella finestra
+  const [outsidePrompt, setOutsidePrompt] = useState(null) // { eventType } | null
+  const [outsideReason, setOutsideReason] = useState('')
 
   // Tick orologio ogni secondo
   useEffect(() => {
@@ -65,45 +69,103 @@ export default function Clock() {
   const workedH = Math.floor(workedMs / 3600000)
   const workedM = Math.floor((workedMs % 3600000) / 60000)
 
+  // Cerca un turno PUBBLICATO del dipendente che "copra" adesso, con tolleranza:
+  // inizio - 15 min  <=  now  <=  fine + 60 min. Ritorna lo shift o null.
+  const findCoveringShift = async () => {
+    const nowMs = Date.now()
+    const lowerBound = new Date(nowMs - 60 * 60 * 1000).toISOString() // turni iniziati al massimo 60' fa... vedi sotto
+    // Prendo i turni pubblicati di oggi-intorno e filtro in JS sulla finestra
+    // (start - 15min <= now <= end + 60min). Range largo per sicurezza.
+    const dayStart = new Date(nowMs - 24 * 3600 * 1000).toISOString()
+    const dayEnd = new Date(nowMs + 24 * 3600 * 1000).toISOString()
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('id, start_at, end_at, status')
+      .eq('staff_id', profile.id)
+      .eq('status', 'published')
+      .gte('start_at', dayStart)
+      .lte('start_at', dayEnd)
+    if (error || !data) return null
+    const WIN_BEFORE = 15 * 60 * 1000
+    const WIN_AFTER = 60 * 60 * 1000
+    const match = data.find((s) => {
+      const start = new Date(s.start_at).getTime()
+      const end = new Date(s.end_at).getTime()
+      return nowMs >= start - WIN_BEFORE && nowMs <= end + WIN_AFTER
+    })
+    return match || null
+  }
+
+  // Esegue l'insert vero e proprio. shiftId/outside/reason opzionali.
+  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null } = {}) => {
+    const pos = await getCurrentPosition()
+
+    let distance = null
+    const lat = settings && settings.center_latitude !== null ? parseFloat(settings.center_latitude) : null
+    const lng = settings && settings.center_longitude !== null ? parseFloat(settings.center_longitude) : null
+    if (lat !== null && lng !== null) {
+      distance = haversineMeters(pos.latitude, pos.longitude, lat, lng)
+    }
+    setLastDistance(distance)
+
+    const radius = settings?.geofence_radius_meters || 150
+    if (distance !== null && distance > radius) {
+      throw new Error(
+        `Sei a ${Math.round(distance)}m dal centro (raggio massimo ${radius}m). Avvicinati al centro per timbrare.`
+      )
+    }
+
+    const payload = {
+      staff_id: profile.id,
+      event_type: eventType,
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+      gps_accuracy: pos.accuracy,
+      device_info: navigator.userAgent.substring(0, 200),
+      outside_shift: outside,
+      outside_shift_reason: outside ? reason : null,
+    }
+    if (shiftId) payload.shift_id = shiftId
+
+    const { error: insError } = await supabase.from('time_entries').insert(payload)
+    if (insError) throw insError
+
+    setSuccess(SUCCESS_MSGS[eventType] || 'Timbrato')
+    setTimeout(() => setSuccess(null), 3500)
+    await fetchData()
+  }
+
   const handleClock = async (eventType) => {
     setError(null)
     setSuccess(null)
+
+    // Il controllo "fuori turno" vale SOLO per l'entrata (clock_in). Pausa e
+    // uscita sono conseguenza di un'entrata gia avvenuta: non ha senso avvisare.
+    if (eventType === 'clock_in') {
+      setSubmitting(true)
+      try {
+        const shift = await findCoveringShift()
+        if (!shift) {
+          // Nessun turno nella finestra: apri il popup motivo, non timbrare ancora.
+          setSubmitting(false)
+          setOutsideReason('')
+          setOutsidePrompt({ eventType })
+          return
+        }
+        // In turno: timbra e collega lo shift.
+        await doInsert(eventType, { shiftId: shift.id })
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
+    // Pausa / uscita / ripresa: flusso normale.
     setSubmitting(true)
     try {
-      // 1. Geolocalizzazione
-      const pos = await getCurrentPosition()
-
-      // 2. Calcola distanza in locale per anteprima
-      let distance = null
-      const lat = settings && settings.center_latitude !== null ? parseFloat(settings.center_latitude) : null
-      const lng = settings && settings.center_longitude !== null ? parseFloat(settings.center_longitude) : null
-      if (lat !== null && lng !== null) {
-        distance = haversineMeters(pos.latitude, pos.longitude, lat, lng)
-      }
-      setLastDistance(distance)
-
-      // 3. Geofence check (lato client; il trigger DB calcola di nuovo lato server)
-      const radius = settings?.geofence_radius_meters || 150
-      if (distance !== null && distance > radius) {
-        throw new Error(
-          `Sei a ${Math.round(distance)}m dal centro (raggio massimo ${radius}m). Avvicinati al centro per timbrare.`
-        )
-      }
-
-      // 4. Insert
-      const { error: insError } = await supabase.from('time_entries').insert({
-        staff_id: profile.id,
-        event_type: eventType,
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-        gps_accuracy: pos.accuracy,
-        device_info: navigator.userAgent.substring(0, 200),
-      })
-      if (insError) throw insError
-
-      setSuccess(SUCCESS_MSGS[eventType] || 'Timbrato')
-      setTimeout(() => setSuccess(null), 3500)
-      await fetchData()
+      await doInsert(eventType)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -111,9 +173,28 @@ export default function Clock() {
     }
   }
 
-  // Gli esenti da timbratura non devono accedere a questa pagina: la voce è
-  // nascosta dal menu, ma /clock resta raggiungibile via URL o da vecchie
-  // notifiche. Li rimando alla dashboard. (Dopo gli hook, per non violarne le regole.)
+  // Conferma dal popup "fuori turno": motivo obbligatorio.
+  const confirmOutside = async () => {
+    const reason = outsideReason.trim()
+    if (!reason) return // bottone disabilitato, ma doppia sicurezza
+    const eventType = outsidePrompt.eventType
+    setOutsidePrompt(null)
+    setSubmitting(true)
+    try {
+      await doInsert(eventType, { outside: true, reason })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const cancelOutside = () => {
+    setOutsidePrompt(null)
+    setOutsideReason('')
+  }
+
+  // Titolari/soci esenti da timbratura: non possono accedere a questa pagina.
   if (profile?.timbratura_esente) {
     return <Navigate to="/dashboard" replace />
   }
@@ -237,6 +318,52 @@ export default function Clock() {
           {settings.center_name} · raggio {settings.geofence_radius_meters || 150}m
         </div>
       )}
+
+      {/* Popup: timbratura fuori turno (motivo obbligatorio) */}
+      {outsidePrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-3xl border border-cream-300 shadow-xl max-w-md w-full p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <CalendarX size={20} className="text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-serif text-xl text-warm-dark">Non risulti di turno</h3>
+                <p className="font-sans text-sm text-warm-brown mt-1">
+                  Non hai un turno pubblicato in questo momento. Puoi timbrare lo stesso,
+                  ma indica il motivo: il responsabile lo vedrà.
+                </p>
+              </div>
+            </div>
+
+            <label className="block font-sans text-xs font-semibold text-warm-brown uppercase tracking-wider mb-1">
+              Motivo (obbligatorio)
+            </label>
+            <textarea
+              value={outsideReason}
+              onChange={(e) => setOutsideReason(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="Es. copertura torneo, sostituzione al desk, copertura partita..."
+              className="w-full rounded-xl border border-cream-300 px-3 py-2 font-sans text-sm text-warm-dark focus:outline-none focus:ring-2 focus:ring-terracotta-300 resize-none"
+            />
+
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={cancelOutside}
+                className="flex-1 py-3 rounded-2xl font-sans font-semibold text-sm bg-cream-100 hover:bg-cream-200 text-warm-dark border border-cream-300 transition">
+                Annulla
+              </button>
+              <button
+                onClick={confirmOutside}
+                disabled={!outsideReason.trim()}
+                className="flex-1 py-3 rounded-2xl font-sans font-semibold text-sm bg-terracotta-400 hover:bg-terracotta-500 text-white transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Timbra comunque
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -259,6 +386,9 @@ function EventRow({ entry }) {
           {distance !== null && ` · ${distance}m dal centro`}
           {entry.is_within_geofence === false && (
             <span className="ml-1 text-red-600 font-semibold">⚠ fuori area</span>
+          )}
+          {entry.outside_shift === true && (
+            <span className="ml-1 text-amber-600 font-semibold">⚠ fuori turno</span>
           )}
         </div>
       </div>
