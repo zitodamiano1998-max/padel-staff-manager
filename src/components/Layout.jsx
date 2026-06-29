@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import {
-  LogOut, Users, LayoutDashboard, Calendar, Moon,
+  LogOut, Users, LayoutDashboard, Calendar, CalendarOff,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
   Settings as SettingsIcon, CalendarPlus, FolderOpen, BarChart3, User,
 } from 'lucide-react'
@@ -79,8 +79,8 @@ export default function Layout({ children }) {
             <NavLink to="/planning" icon={<Calendar size={16} />} active={isActive('/planning')}>
               Planning
             </NavLink>
-            <NavLink to="/availability" icon={<Moon size={16} />} active={isActive('/availability')}>
-              Disponibilità
+            <NavLink to="/availability" icon={<CalendarOff size={16} />} active={isActive('/availability')}>
+              Indisponibilità
             </NavLink>
             <NavLink to="/leaves" icon={<Palmtree size={16} />} active={isActive('/leaves')}>
               Ferie

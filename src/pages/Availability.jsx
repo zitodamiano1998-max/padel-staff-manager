@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { combineDateTime } from '../lib/dateUtils'
-import { Plus, Trash2, Calendar, X, Moon } from 'lucide-react'
+import { Plus, Trash2, Calendar, X, CalendarOff } from 'lucide-react'
 
 export default function Availability() {
   const { profile } = useAuth()
@@ -63,7 +63,7 @@ export default function Availability() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-4xl text-warm-dark mb-1">Disponibilità</h1>
+          <h1 className="text-4xl text-warm-dark mb-1">Indisponibilità</h1>
           <p className="font-sans text-sm text-warm-brown max-w-2xl">
             {isManager
               ? 'Indisponibilità dichiarate dallo staff. Quando crei un turno in uno di questi slot, l\'app blocca il salvataggio.'
@@ -168,7 +168,7 @@ function AvailabilityRow({ item, showName, canDelete, onDelete }) {
   return (
     <div className="flex items-start gap-4 bg-white rounded-xl border border-cream-300 p-4">
       <div className="w-10 h-10 rounded-lg bg-terracotta-100 text-terracotta-700 flex items-center justify-center flex-shrink-0">
-        <Moon size={18} />
+        <CalendarOff size={18} />
       </div>
       <div className="flex-1 min-w-0">
         {showName && (
