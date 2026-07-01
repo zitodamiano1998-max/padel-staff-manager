@@ -6,6 +6,7 @@ import {
   startOfWeek, weekDays, formatDateISO, formatDayLong,
 } from '../lib/dateUtils'
 import TimeEntryFormModal from '../components/TimeEntryFormModal'
+import { computeWorkedMs, roundDateToHalfHour } from '../lib/workedHours'
 import {
   Calendar, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Edit, Trash2, Plus, AlertTriangle,
@@ -924,25 +925,6 @@ function MonthlyRow({ row, days }) {
 // ============================================================================
 
 /**
- * Arrotonda un orario al mezzo-ora più vicino.
- * - 19:00..19:14 -> 19:00
- * - 19:15..19:29 -> 19:30
- * - 19:30..19:44 -> 19:30
- * - 19:45..19:59 -> 20:00
- * Riceve e ritorna un Date.
- */
-function roundDateToHalfHour(d) {
-  const r = new Date(d)
-  const minutes = r.getMinutes()
-  let rounded
-  if (minutes < 15) rounded = 0
-  else if (minutes < 45) rounded = 30
-  else rounded = 60
-  r.setMinutes(rounded, 0, 0)
-  return r
-}
-
-/**
  * Versione che restituisce HH:MM in locale Italia per visualizzazione.
  */
 function formatTimeRounded(date) {
@@ -977,36 +959,6 @@ function buildShiftDayMap(entries) {
     }
   }
   return map
-}
-
-function computeWorkedMs(entries, nowDate) {
-  let total = 0
-  let workStart = null // Date arrotondato per clock_in, esatto per break_end
-  const sorted = [...entries].sort((a, b) => a.event_time.localeCompare(b.event_time))
-  for (const e of sorted) {
-    let t = new Date(e.event_time)
-    // Solo clock_in e clock_out vengono arrotondati al mezzo-ora.
-    // Le pause (break_start/break_end) usano l'orario esatto.
-    if (e.event_type === 'clock_in' || e.event_type === 'clock_out') {
-      t = roundDateToHalfHour(t)
-    }
-    if (e.event_type === 'clock_in') {
-      // Se c'è già un turno aperto, ignora questo IN (probabile duplicato/manuale)
-      if (workStart === null) workStart = t
-    } else if (e.event_type === 'break_end') {
-      // Stessa logica: se non c'è un workStart aperto, riapre il conteggio
-      if (workStart === null) workStart = t
-    } else if (e.event_type === 'break_start' || e.event_type === 'clock_out') {
-      if (workStart !== null) {
-        // Calcola solo se l'OUT è dopo l'IN; ignora coppie invertite/duplicate (Δ ≤ 0)
-        if (t > workStart) total += t - workStart
-        workStart = null
-      }
-      // Se workStart è null, OUT senza IN: ignora (probabile duplicato)
-    }
-  }
-  if (workStart) total += Math.max(0, nowDate - workStart)
-  return Math.max(0, total)
 }
 
 const EVENT_CONFIG = {

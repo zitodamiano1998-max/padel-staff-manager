@@ -6,6 +6,7 @@ import { startOfMonth, addMonths, addDays, isToday, isTomorrow, isYesterday } fr
 import { startOfWeek, formatDateISO } from '../lib/dateUtils'
 import ShiftCompanions from '../components/ShiftCompanions'
 import ManagerTodos from '../components/ManagerTodos'
+import { computeWorkedMs } from '../lib/workedHours'
 import {
   Calendar, Clock as ClockIcon, Palmtree, ArrowRight, AlertCircle,
   ArrowLeftRight, MapPin, Sparkles, CheckCircle2,
@@ -74,7 +75,7 @@ function EmployeeDashboard({ profile }) {
       // Time entries del mese (per calcolo ore)
       supabase
         .from('time_entries')
-        .select('event_time, event_type')
+        .select('event_time, event_type, effective_time')
         .eq('staff_id', profile.id)
         .gte('event_time', monthStart.toISOString())
         .lt('event_time', monthEnd.toISOString())
@@ -233,7 +234,7 @@ function ManagerDashboard({ profile }) {
         .lt('start_at', weekEnd.toISOString())
         .eq('status', 'published'),
       supabase.from('time_entries')
-        .select('event_time, event_type')
+        .select('event_time, event_type, effective_time')
         .eq('staff_id', profile.id)
         .gte('event_time', monthStart.toISOString())
         .lt('event_time', monthEnd.toISOString())
@@ -649,36 +650,4 @@ function getGreeting() {
 
 function pad2(n) {
   return String(n).padStart(2, '0')
-}
-
-function computeWorkedMs(entries, nowDate) {
-  let total = 0
-  let workStart = null
-  const sorted = [...entries].sort((a, b) => a.event_time.localeCompare(b.event_time))
-  for (const e of sorted) {
-    let t = new Date(e.event_time)
-    if (e.event_type === 'clock_in' || e.event_type === 'clock_out') {
-      // Arrotondamento mezzo-ora
-      const minutes = t.getMinutes()
-      let rounded
-      if (minutes < 15) rounded = 0
-      else if (minutes < 45) rounded = 30
-      else rounded = 60
-      const r = new Date(t)
-      r.setMinutes(rounded, 0, 0)
-      t = r
-    }
-    if (e.event_type === 'clock_in') {
-      if (workStart === null) workStart = t
-    } else if (e.event_type === 'break_end') {
-      if (workStart === null) workStart = t
-    } else if (e.event_type === 'break_start' || e.event_type === 'clock_out') {
-      if (workStart !== null) {
-        if (t > workStart) total += t - workStart
-        workStart = null
-      }
-    }
-  }
-  if (workStart) total += Math.max(0, nowDate - workStart)
-  return Math.max(0, total)
 }
