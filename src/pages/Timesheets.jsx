@@ -145,16 +145,29 @@ export default function Timesheets() {
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Il range di fetch è esteso di +6h per catturare uscite post-mezzanotte.
-  // Qui riporto ogni evento al suo shift-day e scarto quelli il cui turno
-  // inizia FUORI dal periodo richiesto (turni delle 6h extra che non c'entrano).
+  // Fetch allargata (-12h / +6h) per i turni a cavallo della mezzanotte.
+  // Riporto ogni evento al suo shift-day e scarto i turni che iniziano FUORI
+  // dal periodo richiesto. IMPORTANTE: lo shift-day va calcolato PER SINGOLO
+  // DIPENDENTE. Nella vista manager l'array contiene gli eventi di tutti
+  // mescolati per orario; se li si accoppia insieme, l'uscita di uno viene
+  // "chiusa" dal clock_out di un altro e il turno notturno si spezza.
   const periodEntries = useMemo(() => {
-    const shiftDayMap = buildShiftDayMap(entries)
     const startDay = formatDateISO(range.start)
     // range.end è esclusivo (giorno successivo 00:00): l'ultimo giorno valido
     // è il giorno prima di range.end.
     const lastValid = new Date(range.end.getTime() - 1)
     const endDay = formatDateISO(lastValid)
+    // shift-day per staff: separo prima per dipendente, poi accoppio.
+    const perStaff = new Map()
+    for (const e of entries) {
+      if (!perStaff.has(e.staff_id)) perStaff.set(e.staff_id, [])
+      perStaff.get(e.staff_id).push(e)
+    }
+    const shiftDayMap = new Map()
+    for (const list of perStaff.values()) {
+      const m = buildShiftDayMap(list)
+      for (const [id, day] of m) shiftDayMap.set(id, day)
+    }
     return entries.filter((e) => {
       const sd = shiftDayMap.get(e.id) || formatDateISO(new Date(e.event_time))
       return sd >= startDay && sd <= endDay
