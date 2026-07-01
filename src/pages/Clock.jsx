@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { computeWorkedMs } from '../lib/workedHours'
 import {
   Play, Pause, Square, Coffee, MapPin, AlertTriangle, CheckCircle2, Clock as ClockIcon, Loader2, CalendarX,
 } from 'lucide-react'
@@ -480,24 +481,6 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function computeWorkedMs(entries, nowDate) {
-  let total = 0
-  let workStart = null
-  for (const e of entries) {
-    const t = new Date(e.event_time)
-    if (e.event_type === 'clock_in' || e.event_type === 'break_end') {
-      workStart = t
-    } else if (e.event_type === 'break_start' || e.event_type === 'clock_out') {
-      if (workStart) {
-        total += t - workStart
-        workStart = null
-      }
-    }
-  }
-  if (workStart) total += nowDate - workStart
-  return Math.max(0, total)
 }
 
 function firstClockInTime(entries) {
