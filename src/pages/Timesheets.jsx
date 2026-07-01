@@ -69,16 +69,21 @@ export default function Timesheets() {
 
   const fetchData = async () => {
     setLoading(true)
-    // Limite superiore esteso di 6h: un turno che finisce dopo mezzanotte
-    // (es. inizio 19:30 del 30, fine 01:30 del giorno dopo) deve rientrare
-    // nella fetch del periodo, altrimenti l'uscita resta orfana e le ore
-    // non vengono contate. Il filtraggio per shift-day riporta poi ogni
-    // turno al suo giorno di inizio.
+    // Finestra di fetch allargata su entrambi i lati per gestire i turni a
+    // cavallo della mezzanotte:
+    //  +6h in avanti  -> cattura l'USCITA dopo mezzanotte di un turno iniziato
+    //                    nell'ultimo giorno del periodo (altrimenti orfana).
+    //  -12h indietro  -> cattura l'ENTRATA (giorno prima) di un turno la cui
+    //                    uscita orfana cade nel primo giorno del periodo; senza
+    //                    questa, l'uscita resta sola e ricade sul giorno sbagliato.
+    // Il filtro periodEntries riporta poi ogni turno al suo giorno di inizio ed
+    // esclude i turni che iniziano fuori dal periodo richiesto.
+    const rangeStartExtended = new Date(range.start.getTime() - 12 * 60 * 60 * 1000)
     const rangeEndExtended = new Date(range.end.getTime() + 6 * 60 * 60 * 1000)
     let entriesQuery = supabase
       .from('time_entries')
       .select('*, staff_members!time_entries_staff_id_fkey(id, first_name, last_name, roles(name, color))')
-      .gte('event_time', range.start.toISOString())
+      .gte('event_time', rangeStartExtended.toISOString())
       .lt('event_time', rangeEndExtended.toISOString())
       .order('event_time', { ascending: true })
 
@@ -122,11 +127,13 @@ export default function Timesheets() {
 
   const fetchMonthlyData = async () => {
     setMonthlyLoading(true)
+    // Vedi fetchData: finestra allargata -12h / +6h per i turni notturni.
+    const monthlyStartExtended = new Date(monthlyRange.start.getTime() - 12 * 60 * 60 * 1000)
     const monthlyEndExtended = new Date(monthlyRange.end.getTime() + 6 * 60 * 60 * 1000)
     const { data, error } = await supabase
       .from('time_entries')
       .select('*, staff_members!time_entries_staff_id_fkey(id, first_name, last_name, roles(name, color))')
-      .gte('event_time', monthlyRange.start.toISOString())
+      .gte('event_time', monthlyStartExtended.toISOString())
       .lt('event_time', monthlyEndExtended.toISOString())
       .order('event_time', { ascending: true })
     if (!error) setMonthlyEntries(data || [])
