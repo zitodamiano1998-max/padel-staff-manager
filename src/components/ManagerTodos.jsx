@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import {
   Palmtree, ArrowLeftRight, Search, FileEdit, AlertTriangle,
   CheckCircle2, ChevronRight, Loader2, Clock as ClockAlert,
+  Check, X,
 } from 'lucide-react'
 import TimeEntryFormModal from './TimeEntryFormModal'
 
@@ -17,6 +18,10 @@ export default function ManagerTodos() {
   // Modal timbratura manuale
   const [missingModalOpen, setMissingModalOpen] = useState(false)
   const [missingPreset, setMissingPreset] = useState(null)
+
+  // Decisione ritardo in corso: { [entry_id]: 'confirm' | 'penalize' } mentre chiama la RPC
+  const [deciding, setDeciding] = useState({})
+  const [decideError, setDecideError] = useState(null)
 
   const fetchTodos = async () => {
     setLoading(true)
@@ -60,8 +65,12 @@ export default function ManagerTodos() {
 
   if (!todos) return null
 
-  // Stato vuoto: tutto a posto
-  if (todos.total_actions === 0) {
+  const lateList = todos.late_decisions?.list || []
+  const lateCount = todos.late_decisions?.count || 0
+
+  // Stato vuoto: tutto a posto. Le decisioni-ritardo non sono in total_actions,
+  // quindi le controllo a parte: se ce ne sono, NON e' "tutto a posto".
+  if (todos.total_actions === 0 && lateCount === 0) {
     return (
       <div className="bg-sage-50 border border-sage-200 rounded-2xl p-5 flex items-center gap-3">
         <CheckCircle2 size={22} className="text-sage-700 flex-shrink-0" />
@@ -102,6 +111,33 @@ export default function ManagerTodos() {
     setMissingPreset(null)
     // Ricarica todos: il turno appena risolto sparisce
     await fetchTodos()
+  }
+
+  // Decisione manager su timbratura in ritardo (finestra 6-10 min)
+  // p_decision: 'confirm' (vale da S) | 'penalize' (vale da S+30)
+  const handleLateDecision = async (entryId, decision) => {
+    setDecideError(null)
+    setDeciding((d) => ({ ...d, [entryId]: decision }))
+    const { data, error } = await supabase.rpc('decide_late_clockin', {
+      p_entry_id: entryId,
+      p_decision: decision,
+    })
+    if (error || !data?.ok) {
+      setDecideError(error?.message || data?.error || 'Errore nella decisione')
+      setDeciding((d) => {
+        const next = { ...d }
+        delete next[entryId]
+        return next
+      })
+      return
+    }
+    // Successo: ricarica: la card sparisce (late_pending ora false)
+    await fetchTodos()
+    setDeciding((d) => {
+      const next = { ...d }
+      delete next[entryId]
+      return next
+    })
   }
 
   const tiles = [
@@ -171,7 +207,7 @@ export default function ManagerTodos() {
           <div>
             <h3 className="font-serif text-xl text-warm-dark leading-tight">Cose da fare</h3>
             <p className="font-sans text-xs text-warm-brown mt-0.5">
-              {todos.total_actions} {todos.total_actions === 1 ? 'azione' : 'azioni'} in sospeso
+              {todos.total_actions + lateCount} {(todos.total_actions + lateCount) === 1 ? 'azione' : 'azioni'} in sospeso
             </p>
           </div>
         </div>
@@ -180,6 +216,36 @@ export default function ManagerTodos() {
             <TodoTile key={tile.key} {...tile} />
           ))}
         </div>
+
+        {/* Timbrature in ritardo (6-10 min): decisione manager sul posto */}
+        {lateCount > 0 && (
+          <div className={activeTiles.length > 0 ? 'mt-5 pt-5 border-t border-cream-200' : ''}>
+            <div className="flex items-center gap-2 mb-3">
+              <ClockAlert size={16} className="text-amber-600" />
+              <h4 className="font-sans text-sm font-semibold text-warm-dark">
+                Timbrature in ritardo da approvare
+              </h4>
+              <span className="font-sans text-xs text-warm-brown">
+                ({lateCount})
+              </span>
+            </div>
+            {decideError && (
+              <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700 font-sans text-xs">
+                {decideError}
+              </div>
+            )}
+            <div className="flex flex-col gap-2">
+              {lateList.map((item) => (
+                <LateDecisionCard
+                  key={item.entry_id}
+                  item={item}
+                  deciding={deciding[item.entry_id]}
+                  onDecide={handleLateDecision}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal timbratura manuale */}
@@ -220,5 +286,53 @@ function TodoTile({ count, label, sub, onClick, tone, icon }) {
       </div>
       <ChevronRight size={16} className={t.text + ' flex-shrink-0'} />
     </button>
+  )
+}
+
+// ============================================================================
+// Card decisione timbratura in ritardo (finestra 6-10 min)
+function LateDecisionCard({ item, deciding, onDecide }) {
+  const busy = !!deciding
+  // Orari in locale (Europe/Rome via browser): S e S+30
+  const fmt = (iso) =>
+    new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  const sched = new Date(item.scheduled_start)
+  const startLbl = fmt(item.scheduled_start)
+  const penalLbl = fmt(new Date(sched.getTime() + 30 * 60 * 1000))
+  const realLbl = fmt(item.event_time)
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-sans text-sm font-semibold text-warm-dark truncate">
+            {item.staff_name}
+          </div>
+          <div className="font-sans text-xs text-warm-brown mt-0.5">
+            Turno {startLbl} · timbrato {realLbl} ({item.ritardo_min} min di ritardo)
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => onDecide(item.entry_id, 'confirm')}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage-100 hover:bg-sage-200 border border-sage-300 text-sage-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+            {deciding === 'confirm'
+              ? <Loader2 size={14} className="animate-spin" />
+              : <Check size={14} />}
+            Conferma {startLbl}
+          </button>
+          <button
+            onClick={() => onDecide(item.entry_id, 'penalize')}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+            {deciding === 'penalize'
+              ? <Loader2 size={14} className="animate-spin" />
+              : <X size={14} />}
+            Penalizza {penalLbl}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
