@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import {
   Package, Plus, ArrowDownCircle, ArrowUpCircle, ClipboardCheck,
-  AlertTriangle, Loader2, X, Boxes, CheckCircle2,
+  AlertTriangle, Loader2, X, Boxes, CheckCircle2, History, ScrollText,
 } from 'lucide-react'
 
 // Staff id di Damiano Zito: unico autorizzato al magazzino (allineato a is_magazzino_admin nel DB).
@@ -124,6 +124,7 @@ export default function Magazzino() {
               row={r}
               onMovimento={() => setModal({ kind: 'movimento', prodotto: r })}
               onConteggio={() => setModal({ kind: 'conteggio', prodotto: r })}
+              onStorico={() => setModal({ kind: 'storico', prodotto: r })}
             />
           ))}
         </div>
@@ -153,13 +154,19 @@ export default function Magazzino() {
           onError={(m) => setError(m)}
         />
       )}
+      {modal?.kind === 'storico' && (
+        <StoricoModal
+          prodotto={modal.prodotto}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   )
 }
 
 // ---- Card articolo ----
 
-function ProdottoCard({ row, onMovimento, onConteggio }) {
+function ProdottoCard({ row, onMovimento, onConteggio, onStorico }) {
   const under = row.sotto_soglia && row.attivo
   return (
     <div className={`bg-white rounded-2xl border shadow-sm p-5 ${
@@ -209,6 +216,11 @@ function ProdottoCard({ row, onMovimento, onConteggio }) {
           <ClipboardCheck size={15} /> Conteggio
         </button>
       </div>
+      <button
+        onClick={onStorico}
+        className="w-full flex items-center justify-center gap-1.5 py-2 mt-2 rounded-xl font-sans text-sm text-warm-brown hover:bg-cream-100 transition">
+        <History size={14} /> Storico movimenti
+      </button>
     </div>
   )
 }
@@ -293,6 +305,7 @@ function NuovoProdottoModal({ onClose, onSaved, onError }) {
 
 function MovimentoModal({ prodotto, onClose, onSaved, onError }) {
   const [tipo, setTipo] = useState('carico') // 'carico' | 'scarico'
+  const [causale, setCausale] = useState('vendita') // 'vendita' | 'consumo' | 'generico'
   const [quantita, setQuantita] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -302,15 +315,24 @@ function MovimentoModal({ prodotto, onClose, onSaved, onError }) {
 
   const save = async () => {
     setSaving(true)
+    // 'generico' = scarico senza causale specifica (p_causale null)
+    const p_causale = tipo === 'scarico' && causale !== 'generico' ? causale : null
     const { error } = await supabase.rpc('magazzino_movimento', {
       p_prodotto: prodotto.id,
       p_tipo: tipo,
       p_quantita: qNum,
       p_note: note.trim() || null,
+      p_causale,
     })
     setSaving(false)
     if (error) { onError('Movimento non registrato. Riprova.'); return }
-    onSaved(tipo === 'carico' ? 'Carico registrato' : 'Scarico registrato')
+    let label = 'Carico registrato'
+    if (tipo === 'scarico') {
+      label = causale === 'vendita' ? 'Vendita registrata'
+        : causale === 'consumo' ? 'Consumo registrato'
+        : 'Scarico registrato'
+    }
+    onSaved(label)
   }
 
   return (
@@ -335,6 +357,40 @@ function MovimentoModal({ prodotto, onClose, onSaved, onError }) {
           <ArrowDownCircle size={16} /> Scarico
         </button>
       </div>
+
+      {/* Causale scarico: distingue vendita da consumo per il calcolo ammanco */}
+      {tipo === 'scarico' && (
+        <div className="mb-4">
+          <label className="block font-sans text-xs font-semibold text-warm-brown uppercase tracking-wider mb-1.5">
+            Causale scarico
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { key: 'vendita', label: 'Vendita' },
+              { key: 'consumo', label: 'Consumo' },
+              { key: 'generico', label: 'Altro' },
+            ].map((c) => (
+              <button
+                key={c.key}
+                onClick={() => setCausale(c.key)}
+                className={`py-2 rounded-lg font-sans text-sm border transition ${
+                  causale === c.key
+                    ? 'bg-terracotta-50 border-terracotta-300 text-terracotta-700 font-semibold'
+                    : 'bg-cream-50 border-cream-300 text-warm-brown hover:bg-cream-100'
+                }`}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <p className="font-sans text-xs text-warm-brown/70 mt-1.5">
+            {causale === 'vendita'
+              ? 'Uscita venduta al desk, tracciata per la riconciliazione.'
+              : causale === 'consumo'
+              ? 'Uscita per uso interno (torneo, prova, omaggio).'
+              : 'Altra uscita senza causale specifica.'}
+          </p>
+        </div>
+      )}
 
       <div className="bg-cream-50 rounded-xl px-4 py-3 mb-4 flex items-center justify-between">
         <span className="font-sans text-sm text-warm-brown">Giacenza attuale</span>
@@ -367,7 +423,12 @@ function MovimentoModal({ prodotto, onClose, onSaved, onError }) {
       <ModalActions
         onCancel={onClose}
         onConfirm={save}
-        confirmLabel={tipo === 'carico' ? 'Registra carico' : 'Registra scarico'}
+        confirmLabel={
+          tipo === 'carico' ? 'Registra carico'
+            : causale === 'vendita' ? 'Registra vendita'
+            : causale === 'consumo' ? 'Registra consumo'
+            : 'Registra scarico'
+        }
         confirmDisabled={!canSave}
         saving={saving}
       />
@@ -380,10 +441,30 @@ function MovimentoModal({ prodotto, onClose, onSaved, onError }) {
 function ConteggioModal({ prodotto, onClose, onSaved, onError }) {
   const [reale, setReale] = useState('')
   const [saving, setSaving] = useState(false)
+  const [dett, setDett] = useState(null)
+  const [loadingDett, setLoadingDett] = useState(true)
 
+  const unita = prodotto.unita_misura || 'pz'
+
+  // Carico il dettaglio dal DB: teorico fresco + vendite/consumi dall'ultimo conteggio.
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      const { data, error } = await supabase.rpc('magazzino_dettaglio_conteggio', {
+        p_prodotto: prodotto.id,
+      })
+      if (!active) return
+      if (!error && data) setDett(data)
+      setLoadingDett(false)
+    })()
+    return () => { active = false }
+  }, [prodotto.id])
+
+  // Teorico dal DB se disponibile, altrimenti fallback alla giacenza già in lista.
+  const teorico = dett ? Number(dett.giacenza_teorica) : Number(prodotto.giacenza)
   const rNum = Number(reale)
-  const canSave = reale !== '' && rNum >= 0 && !saving
-  const delta = reale === '' ? null : rNum - Number(prodotto.giacenza)
+  const canSave = reale !== '' && rNum >= 0 && !saving && !loadingDett
+  const ammanco = reale === '' ? null : teorico - rNum // >0 = manca roba non spiegata
 
   const save = async () => {
     setSaving(true)
@@ -399,43 +480,197 @@ function ConteggioModal({ prodotto, onClose, onSaved, onError }) {
 
   return (
     <ModalShell title={prodotto.nome} subtitle="Conteggio: allinea la giacenza al reale" onClose={onClose}>
-      <div className="bg-cream-50 rounded-xl px-4 py-3 mb-4 flex items-center justify-between">
-        <span className="font-sans text-sm text-warm-brown">Giacenza calcolata</span>
-        <span className="font-serif text-xl text-warm-dark tabular-nums">
-          {formatQty(prodotto.giacenza)} {prodotto.unita_misura || 'pz'}
-        </span>
-      </div>
-
-      <Field label="Quantità reale contata">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          value={reale}
-          onChange={(e) => setReale(e.target.value)}
-          autoFocus
-          placeholder="0"
-          className={inputClass}
-        />
-      </Field>
-
-      {delta !== null && delta !== 0 && (
-        <div className="font-sans text-sm text-warm-brown mb-2">
-          Rettifica: <span className={`font-semibold ${delta > 0 ? 'text-sage-700' : 'text-red-700'}`}>
-            {delta > 0 ? '+' : ''}{formatQty(delta)} {prodotto.unita_misura || 'pz'}
-          </span>
+      {loadingDett ? (
+        <div className="text-center py-6 text-warm-brown font-sans">
+          <Loader2 size={18} className="animate-spin inline mr-2" /> Caricamento dati...
         </div>
-      )}
+      ) : (
+        <>
+          {/* Riepilogo periodo: contesto, non termini da sottrarre */}
+          <div className="bg-cream-50 rounded-xl px-4 py-3 mb-4 space-y-1.5">
+            <Riga label="Giacenza teorica" value={`${formatQty(teorico)} ${unita}`} strong />
+            {dett && Number(dett.venduti_periodo) > 0 && (
+              <Riga label="Venduti dall'ultimo conteggio" value={`${formatQty(dett.venduti_periodo)} ${unita}`} muted />
+            )}
+            {dett && Number(dett.consumati_periodo) > 0 && (
+              <Riga label="Consumi interni nel periodo" value={`${formatQty(dett.consumati_periodo)} ${unita}`} muted />
+            )}
+            {dett && Number(dett.scarichi_generici) > 0 && (
+              <Riga label="Altri scarichi nel periodo" value={`${formatQty(dett.scarichi_generici)} ${unita}`} muted />
+            )}
+          </div>
 
-      <ModalActions
-        onCancel={onClose}
-        onConfirm={save}
-        confirmLabel="Aggiorna giacenza"
-        confirmDisabled={!canSave}
-        saving={saving}
-      />
+          <Field label="Quantità reale contata">
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              value={reale}
+              onChange={(e) => setReale(e.target.value)}
+              autoFocus
+              placeholder="0"
+              className={inputClass}
+            />
+          </Field>
+
+          {/* Ammanco in evidenza: il punto del sistema */}
+          {ammanco !== null && (
+            <div className={`rounded-xl px-4 py-3 mb-2 border ${
+              ammanco > 0
+                ? 'bg-red-50 border-red-200'
+                : ammanco < 0
+                ? 'bg-amber-50 border-amber-200'
+                : 'bg-sage-50 border-sage-200'
+            }`}>
+              {ammanco > 0 ? (
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={18} className="text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-sans text-sm font-semibold text-red-800">
+                      Ammanco: {formatQty(ammanco)} {unita}
+                    </div>
+                    <div className="font-sans text-xs text-red-700/80 mt-0.5">
+                      Uscito ma non registrato come vendita o consumo. Verifica di aver segnato tutte le vendite.
+                    </div>
+                  </div>
+                </div>
+              ) : ammanco < 0 ? (
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-sans text-sm font-semibold text-amber-800">
+                      Eccedenza: {formatQty(-ammanco)} {unita}
+                    </div>
+                    <div className="font-sans text-xs text-amber-700/80 mt-0.5">
+                      Contati più pezzi del teorico. Forse un carico non registrato.
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-sage-500" />
+                  <div className="font-sans text-sm font-semibold text-sage-700">
+                    Tutto quadra: nessun ammanco.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <ModalActions
+            onCancel={onClose}
+            onConfirm={save}
+            confirmLabel="Conferma conteggio"
+            confirmDisabled={!canSave}
+            saving={saving}
+          />
+        </>
+      )}
     </ModalShell>
   )
+}
+
+function Riga({ label, value, strong, muted }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className={`font-sans text-sm ${muted ? 'text-warm-brown/70' : 'text-warm-brown'}`}>
+        {label}
+      </span>
+      <span className={`tabular-nums ${
+        strong ? 'font-serif text-lg text-warm-dark' : 'font-sans text-sm text-warm-dark'
+      }`}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// ---- Modale: storico movimenti (legge magazzino_movimenti) ----
+
+function StoricoModal({ prodotto, onClose }) {
+  const [movimenti, setMovimenti] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      const { data, error: err } = await supabase
+        .from('magazzino_movimenti')
+        .select('*')
+        .eq('prodotto_id', prodotto.id)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (!active) return
+      if (err) setError(true)
+      else setMovimenti(data || [])
+      setLoading(false)
+    })()
+    return () => { active = false }
+  }, [prodotto.id])
+
+  const unita = prodotto.unita_misura || 'pz'
+
+  return (
+    <ModalShell title={prodotto.nome} subtitle="Storico movimenti" onClose={onClose}>
+      {loading ? (
+        <div className="text-center py-8 text-warm-brown font-sans">
+          <Loader2 size={18} className="animate-spin inline mr-2" /> Caricamento...
+        </div>
+      ) : error ? (
+        <div className="bg-red-50 border-2 border-red-300 rounded-xl px-4 py-3 flex items-start gap-2">
+          <AlertTriangle size={18} className="text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="font-sans text-sm text-red-800">Impossibile caricare lo storico. Riprova.</div>
+        </div>
+      ) : movimenti.length === 0 ? (
+        <div className="text-center py-8">
+          <ScrollText size={26} className="text-warm-brown/40 mx-auto mb-2" />
+          <div className="font-sans text-sm text-warm-brown">Nessun movimento registrato.</div>
+        </div>
+      ) : (
+        <div className="space-y-2 max-h-[60vh] overflow-y-auto -mx-1 px-1">
+          {movimenti.map((m) => (
+            <MovimentoRow key={m.id} mov={m} unita={unita} />
+          ))}
+        </div>
+      )}
+    </ModalShell>
+  )
+}
+
+function MovimentoRow({ mov, unita }) {
+  // Per gli scarichi, la causale raffina l'etichetta (vendita/consumo).
+  const cfg = movConfig(mov)
+  const q = Number(mov.quantita)
+  const segno = q > 0 ? '+' : '' // scarichi hanno già il segno meno
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-cream-200 last:border-b-0">
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${cfg.bg}`}>
+        <cfg.Icon size={14} className={cfg.fg} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-sans text-sm font-semibold text-warm-dark">{cfg.label}</span>
+          <span className={`font-sans text-sm font-semibold tabular-nums ${cfg.fg}`}>
+            {segno}{formatQty(q)} {unita}
+          </span>
+        </div>
+        <div className="font-sans text-xs text-warm-brown mt-0.5">
+          {formatDateTime(mov.created_at)}
+          {mov.note && <> · {mov.note}</>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function movConfig(mov) {
+  if (mov.tipo === 'scarico') {
+    if (mov.causale === 'vendita') return { label: 'Vendita', Icon: ArrowDownCircle, bg: 'bg-terracotta-50', fg: 'text-terracotta-600' }
+    if (mov.causale === 'consumo') return { label: 'Consumo', Icon: ArrowDownCircle, bg: 'bg-amber-100', fg: 'text-amber-700' }
+    return MOV_CONFIG.scarico
+  }
+  return MOV_CONFIG[mov.tipo] || MOV_CONFIG.rettifica
 }
 
 // ---- Shell / helper UI ----
@@ -495,6 +730,18 @@ function ModalActions({ onCancel, onConfirm, confirmLabel, confirmDisabled, savi
 }
 
 // ---- Helpers ----
+
+const MOV_CONFIG = {
+  carico:    { label: 'Carico',    Icon: ArrowUpCircle,   bg: 'bg-sage-100', fg: 'text-sage-700' },
+  scarico:   { label: 'Scarico',   Icon: ArrowDownCircle, bg: 'bg-red-100',  fg: 'text-red-700' },
+  rettifica: { label: 'Conteggio', Icon: ClipboardCheck,  bg: 'bg-cream-200', fg: 'text-warm-brown' },
+}
+
+function formatDateTime(iso) {
+  const d = new Date(iso)
+  return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
+    + ' · ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+}
 
 function formatQty(n) {
   const num = Number(n)
