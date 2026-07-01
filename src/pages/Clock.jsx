@@ -10,7 +10,7 @@ export default function Clock() {
   const { profile } = useAuth()
 
   const [settings, setSettings] = useState(null)
-  const [todayEntries, setTodayEntries] = useState([])
+  const [recentEntries, setRecentEntries] = useState([]) // ultime 24h (grezze)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -35,37 +35,70 @@ export default function Clock() {
 
   const fetchData = async () => {
     setLoading(true)
-    const todayStart = startOfToday().toISOString()
+    // Carico le ultime 24h (non solo "da mezzanotte"): un turno iniziato ieri
+    // sera e ancora aperto DEVE comparire, altrimenti dopo mezzanotte il
+    // dipendente perde lo stato "in servizio" e vede di nuovo "Inizia turno".
+    const lookbackStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const [setRes, entRes] = await Promise.all([
       supabase.from('settings').select('*').limit(1).maybeSingle(),
       supabase
         .from('time_entries')
         .select('*')
         .eq('staff_id', profile.id)
-        .gte('event_time', todayStart)
+        .gte('event_time', lookbackStart)
         .order('event_time', { ascending: true }),
     ])
     if (!setRes.error) setSettings(setRes.data)
-    if (!entRes.error) setTodayEntries(entRes.data || [])
+    if (!entRes.error) setRecentEntries(entRes.data || [])
     setLoading(false)
   }
 
-  // Stato corrente del dipendente oggi
+  // STATO CORRENTE: si basa sull'ULTIMO evento delle ultime 24h, a prescindere
+  // dal giorno di calendario. È questo che risolve il turno a cavallo della
+  // mezzanotte: un clock_in di ieri sera senza clock_out => ancora 'working'.
   const state = useMemo(() => {
-    if (todayEntries.length === 0) return 'not_started'
-    const last = todayEntries[todayEntries.length - 1]
-    if (last.event_type === 'clock_out') return 'between_shifts'
+    if (recentEntries.length === 0) return 'not_started'
+    const last = recentEntries[recentEntries.length - 1]
+    // Se l'ultimo evento è un clock_out, il turno è chiuso.
+    // Distinguo: chiuso OGGI -> 'between_shifts' (pronto per un altro turno oggi);
+    // chiuso IERI -> 'not_started' (giorno nuovo, si riparte pulito).
+    if (last.event_type === 'clock_out') {
+      return isToday(last.event_time) ? 'between_shifts' : 'not_started'
+    }
     if (last.event_type === 'break_start') return 'on_break'
-    return 'working' // clock_in o break_end
-  }, [todayEntries])
+    return 'working' // clock_in o break_end ancora aperti
+  }, [recentEntries])
 
   const stateInfo = STATE_INFO[state]
+
+  // Eventi del GIORNO corrente: usati per timeline, ore, turni, statistiche.
+  // Restano filtrati su oggi per non gonfiare i conteggi con il turno di ieri.
+  const todayEntries = useMemo(
+    () => recentEntries.filter((e) => isToday(e.event_time)),
+    [recentEntries]
+  )
+
+  // Se un turno è aperto da ieri, o se oggi il primo evento è già un'uscita/pausa
+  // (turno iniziato ieri), le "ore oggi" devono partire da mezzanotte: inserisco
+  // un punto d'inizio virtuale a 00:00 così il conteggio non parte da ieri sera
+  // né resta a zero.
+  const workedEntries = useMemo(() => {
+    const firstToday = todayEntries[0]
+    const startedYesterday =
+      (state === 'working' && !todayEntries.some((e) => e.event_type === 'clock_in')) ||
+      (firstToday && (firstToday.event_type === 'clock_out' || firstToday.event_type === 'break_start'))
+    if (startedYesterday) {
+      const midnight = startOfToday().toISOString()
+      return [{ event_type: 'clock_in', event_time: midnight, _virtual: true }, ...todayEntries]
+    }
+    return todayEntries
+  }, [state, todayEntries])
 
   // Numero di turni iniziati oggi
   const shiftsCount = todayEntries.filter((e) => e.event_type === 'clock_in').length
 
   // Ore lavorate finora oggi (esclude pause)
-  const workedMs = useMemo(() => computeWorkedMs(todayEntries, now), [todayEntries, now])
+  const workedMs = useMemo(() => computeWorkedMs(workedEntries, now), [workedEntries, now])
   const workedH = Math.floor(workedMs / 3600000)
   const workedM = Math.floor((workedMs % 3600000) / 60000)
 
@@ -402,6 +435,15 @@ function startOfToday() {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
   return d
+}
+
+// True se il timestamp cade nel giorno di calendario corrente (ora locale).
+function isToday(eventTime) {
+  const d = new Date(eventTime)
+  const start = startOfToday()
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  return d >= start && d < end
 }
 
 function getCurrentPosition() {
