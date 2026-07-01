@@ -16,6 +16,7 @@ import Documents from './pages/Documents'
 import Stats from './pages/Stats'
 import Profile from './pages/Profile'
 import AcceptInvite from './pages/AcceptInvite'
+import Magazzino from './pages/Magazzino'
 
 function App() {
   return (
@@ -37,6 +38,8 @@ function App() {
 
       <Route path="/staff" element={<ProtectedRoute requireManager><Layout><Staff /></Layout></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute requireManager><Layout><Settings /></Layout></ProtectedRoute>} />
+
+      <Route path="/magazzino" element={<ProtectedRoute requireMagazzino><Layout><Magazzino /></Layout></ProtectedRoute>} />
 
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

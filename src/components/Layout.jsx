@@ -5,10 +5,13 @@ import { supabase } from '../lib/supabase'
 import {
   LogOut, Users, LayoutDashboard, Calendar, CalendarOff,
   Clock as ClockIcon, ListChecks, Palmtree, ArrowLeftRight,
-  Settings as SettingsIcon, CalendarPlus, FolderOpen, BarChart3, User,
+  Settings as SettingsIcon, CalendarPlus, FolderOpen, BarChart3, User, Boxes,
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import OnboardingWizard from './OnboardingWizard'
+
+// Staff id di Damiano Zito: unico che vede la voce Magazzino.
+const MAGAZZINO_ADMIN_STAFF_ID = '3101cefd-6ea5-4675-875f-655f667e2d91'
 
 export default function Layout({ children }) {
   const { profile, signOut } = useAuth()
@@ -53,6 +56,8 @@ export default function Layout({ children }) {
   if (onboardingDone === false) {
     return <OnboardingWizard onComplete={() => setOnboardingDone(true)} />
   }
+
+  const isMagazzinoAdmin = profile?.id === MAGAZZINO_ADMIN_STAFF_ID
 
   return (
     <div className="min-h-screen bg-cream-100">
@@ -113,6 +118,11 @@ export default function Layout({ children }) {
                   Impostazioni
                 </NavLink>
               </>
+            )}
+            {isMagazzinoAdmin && (
+              <NavLink to="/magazzino" icon={<Boxes size={16} />} active={isActive('/magazzino')}>
+                Magazzino
+              </NavLink>
             )}
           </nav>
 

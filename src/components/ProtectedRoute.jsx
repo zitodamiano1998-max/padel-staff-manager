@@ -1,7 +1,10 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 
-export default function ProtectedRoute({ children, requireManager = false }) {
+// Staff id di Damiano Zito: unico autorizzato al magazzino.
+const MAGAZZINO_ADMIN_STAFF_ID = '3101cefd-6ea5-4675-875f-655f667e2d91'
+
+export default function ProtectedRoute({ children, requireManager = false, requireMagazzino = false }) {
   const { session, profile, loading } = useAuth()
 
   // Stato caricamento iniziale
@@ -35,6 +38,11 @@ export default function ProtectedRoute({ children, requireManager = false }) {
 
   // Pagina riservata manager
   if (requireManager && !profile.is_manager) {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  // Pagina riservata al magazzino (solo Damiano). La RLS resta il muro vero lato dati.
+  if (requireMagazzino && profile.id !== MAGAZZINO_ADMIN_STAFF_ID) {
     return <Navigate to="/dashboard" replace />
   }
 
