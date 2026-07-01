@@ -69,11 +69,17 @@ export default function Timesheets() {
 
   const fetchData = async () => {
     setLoading(true)
+    // Limite superiore esteso di 6h: un turno che finisce dopo mezzanotte
+    // (es. inizio 19:30 del 30, fine 01:30 del giorno dopo) deve rientrare
+    // nella fetch del periodo, altrimenti l'uscita resta orfana e le ore
+    // non vengono contate. Il filtraggio per shift-day riporta poi ogni
+    // turno al suo giorno di inizio.
+    const rangeEndExtended = new Date(range.end.getTime() + 6 * 60 * 60 * 1000)
     let entriesQuery = supabase
       .from('time_entries')
       .select('*, staff_members!time_entries_staff_id_fkey(id, first_name, last_name, roles(name, color))')
       .gte('event_time', range.start.toISOString())
-      .lt('event_time', range.end.toISOString())
+      .lt('event_time', rangeEndExtended.toISOString())
       .order('event_time', { ascending: true })
 
     // Dipendente: solo le proprie timbrature
@@ -116,11 +122,12 @@ export default function Timesheets() {
 
   const fetchMonthlyData = async () => {
     setMonthlyLoading(true)
+    const monthlyEndExtended = new Date(monthlyRange.end.getTime() + 6 * 60 * 60 * 1000)
     const { data, error } = await supabase
       .from('time_entries')
       .select('*, staff_members!time_entries_staff_id_fkey(id, first_name, last_name, roles(name, color))')
       .gte('event_time', monthlyRange.start.toISOString())
-      .lt('event_time', monthlyRange.end.toISOString())
+      .lt('event_time', monthlyEndExtended.toISOString())
       .order('event_time', { ascending: true })
     if (!error) setMonthlyEntries(data || [])
     setMonthlyLoading(false)
@@ -131,11 +138,27 @@ export default function Timesheets() {
     setTimeout(() => setToast(null), 3500)
   }
 
+  // Il range di fetch è esteso di +6h per catturare uscite post-mezzanotte.
+  // Qui riporto ogni evento al suo shift-day e scarto quelli il cui turno
+  // inizia FUORI dal periodo richiesto (turni delle 6h extra che non c'entrano).
+  const periodEntries = useMemo(() => {
+    const shiftDayMap = buildShiftDayMap(entries)
+    const startDay = formatDateISO(range.start)
+    // range.end è esclusivo (giorno successivo 00:00): l'ultimo giorno valido
+    // è il giorno prima di range.end.
+    const lastValid = new Date(range.end.getTime() - 1)
+    const endDay = formatDateISO(lastValid)
+    return entries.filter((e) => {
+      const sd = shiftDayMap.get(e.id) || formatDateISO(new Date(e.event_time))
+      return sd >= startDay && sd <= endDay
+    })
+  }, [entries, range.start, range.end])
+
   // Filtraggio per dipendente
   const filteredEntries = useMemo(() => {
-    if (!filterStaffId) return entries
-    return entries.filter((e) => e.staff_id === filterStaffId)
-  }, [entries, filterStaffId])
+    if (!filterStaffId) return periodEntries
+    return periodEntries.filter((e) => e.staff_id === filterStaffId)
+  }, [periodEntries, filterStaffId])
 
   // Raggruppa per staff_id
   const entriesByStaff = useMemo(() => {
@@ -176,7 +199,11 @@ export default function Timesheets() {
       const sEntries = entriesByStaff.get(s.id) || []
       if (sEntries.length === 0 && filterStaffId !== s.id) continue
       const totalMs = computeWorkedMs(sEntries, new Date())
-      const days = new Set(sEntries.map((e) => formatDateISO(new Date(e.event_time))))
+      // giorni lavorati = shift-day distinti (un turno notturno conta 1, non 2)
+      const sShiftMap = buildShiftDayMap(sEntries)
+      const days = new Set(
+        sEntries.map((e) => sShiftMap.get(e.id) || formatDateISO(new Date(e.event_time)))
+      )
       const outside = sEntries.filter((e) => e.is_within_geofence === false).length
       list.push({
         staff: s,
@@ -414,14 +441,21 @@ function StaffCard({ summary, expanded, onToggle, onEdit, onDelete, canEdit = tr
   const h = Math.floor(totalHours)
   const m = Math.round((totalHours - h) * 60)
 
-  // Raggruppa per giorno
+  // Raggruppa per GIORNO DEL TURNO (shift day), non per giorno di calendario
+  // del singolo evento: così un'uscita dopo mezzanotte resta nel giorno in cui
+  // il turno è iniziato, insieme alla sua entrata.
   const byDay = useMemo(() => {
+    const shiftDayMap = buildShiftDayMap(entries)
     const map = new Map()
     entries.forEach((e) => {
-      const day = formatDateISO(new Date(e.event_time))
+      const day = shiftDayMap.get(e.id) || formatDateISO(new Date(e.event_time))
       if (!map.has(day)) map.set(day, [])
       map.get(day).push(e)
     })
+    // ordina gli eventi dentro ogni giorno per orario reale
+    for (const list of map.values()) {
+      list.sort((a, b) => a.event_time.localeCompare(b.event_time))
+    }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   }, [entries])
 
@@ -622,13 +656,27 @@ function MonthlyOverview({ staff, entries, loading, monthDate, onPrevMonth, onNe
   const summary = useMemo(() => {
     // map: staff_id -> { dayMs: { day -> ms }, totalMs, daysWorked, outsideCount }
     const byStaff = new Map()
-    // group entries per staff per giorno
-    const grouped = new Map() // key: `${staff_id}|${dayISO}` -> entries[]
+    // group entries per staff per SHIFT-DAY (giorno del turno, non del singolo
+    // evento): un'uscita dopo mezzanotte resta nel giorno di inizio turno.
+    const grouped = new Map() // key: `${staff_id}|${shiftDayISO}` -> entries[]
+    // shift-day va calcolato per-staff, quindi prima separo per staff.
+    const perStaff = new Map()
     for (const e of entries) {
-      const day = formatDateISO(new Date(e.event_time))
-      const key = `${e.staff_id}|${day}`
-      if (!grouped.has(key)) grouped.set(key, [])
-      grouped.get(key).push(e)
+      if (!perStaff.has(e.staff_id)) perStaff.set(e.staff_id, [])
+      perStaff.get(e.staff_id).push(e)
+    }
+    for (const [sid, sEntries] of perStaff.entries()) {
+      const shiftMap = buildShiftDayMap(sEntries)
+      const monthStart = formatDateISO(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1))
+      const monthEnd = formatDateISO(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0))
+      for (const e of sEntries) {
+        const day = shiftMap.get(e.id) || formatDateISO(new Date(e.event_time))
+        // scarta turni il cui giorno di inizio è fuori dal mese (range esteso +6h)
+        if (day < monthStart || day > monthEnd) continue
+        const key = `${sid}|${day}`
+        if (!grouped.has(key)) grouped.set(key, [])
+        grouped.get(key).push(e)
+      }
     }
     for (const [key, arr] of grouped.entries()) {
       const [staffId, day] = key.split('|')
@@ -656,7 +704,7 @@ function MonthlyOverview({ staff, entries, loading, monthDate, onPrevMonth, onNe
         outsideCount: rec.outsideCount,
       }
     }).sort((a, b) => b.totalHours - a.totalHours)
-  }, [entries, staff])
+  }, [entries, staff, monthDate])
 
   // Totale mensile complessivo
   const grandTotal = useMemo(() => summary.reduce((acc, r) => acc + r.totalHours, 0), [summary])
@@ -880,6 +928,35 @@ function roundDateToHalfHour(d) {
 function formatTimeRounded(date) {
   const d = roundDateToHalfHour(date)
   return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+}
+
+// Assegna a ogni evento il "giorno del turno" (shift day): la data del clock_in
+// che ha aperto il turno a cui l'evento appartiene. Un'uscita dopo mezzanotte
+// eredita così il giorno dell'entrata, invece del proprio giorno di calendario.
+// Ritorna una Map: event.id -> 'YYYY-MM-DD' (shift day).
+// Gli eventi che non appartengono a nessun turno aperto (out orfano) ricadono
+// sul proprio giorno come fallback.
+function buildShiftDayMap(entries) {
+  const map = new Map()
+  const sorted = [...entries].sort((a, b) => a.event_time.localeCompare(b.event_time))
+  let openShiftDay = null // 'YYYY-MM-DD' del clock_in che ha aperto il turno corrente
+  for (const e of sorted) {
+    const ownDay = formatDateISO(new Date(e.event_time))
+    if (e.event_type === 'clock_in') {
+      if (openShiftDay === null) openShiftDay = ownDay
+      map.set(e.id, openShiftDay)
+    } else if (e.event_type === 'break_start' || e.event_type === 'break_end') {
+      // le pause ereditano il giorno del turno aperto (o il proprio se nessuno aperto)
+      map.set(e.id, openShiftDay ?? ownDay)
+    } else if (e.event_type === 'clock_out') {
+      // l'uscita chiude il turno: eredita il giorno di apertura
+      map.set(e.id, openShiftDay ?? ownDay)
+      openShiftDay = null
+    } else {
+      map.set(e.id, ownDay)
+    }
+  }
+  return map
 }
 
 function computeWorkedMs(entries, nowDate) {
