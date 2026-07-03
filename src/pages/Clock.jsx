@@ -105,9 +105,9 @@ export default function Clock() {
 
   // Cerca un turno PUBBLICATO del dipendente che "copra" adesso, con tolleranza:
   // inizio - 15 min  <=  now  <=  fine + 60 min. Ritorna lo shift o null.
+  // Usato per l'ENTRATA: aggancia il turno la cui finestra copre adesso.
   const findCoveringShift = async () => {
     const nowMs = Date.now()
-    const lowerBound = new Date(nowMs - 60 * 60 * 1000).toISOString() // turni iniziati al massimo 60' fa... vedi sotto
     // Prendo i turni pubblicati di oggi-intorno e filtro in JS sulla finestra
     // (start - 15min <= now <= end + 60min). Range largo per sicurezza.
     const dayStart = new Date(nowMs - 24 * 3600 * 1000).toISOString()
@@ -128,6 +128,38 @@ export default function Clock() {
       return nowMs >= start - WIN_BEFORE && nowMs <= end + WIN_AFTER
     })
     return match || null
+  }
+
+  // Come findCoveringShift ma per l'USCITA: aggancia il turno la cui FINE è
+  // più vicina all'orario attuale, entro la finestra start-15min / end+60min.
+  // L'uscita chiude il turno appena terminato, quindi il criterio è end_at,
+  // non start_at. Ritorna { id, start_at, end_at } o null.
+  const findClosingShift = async () => {
+    const nowMs = Date.now()
+    const dayStart = new Date(nowMs - 24 * 3600 * 1000).toISOString()
+    const dayEnd = new Date(nowMs + 24 * 3600 * 1000).toISOString()
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('id, start_at, end_at, status')
+      .eq('staff_id', profile.id)
+      .eq('status', 'published')
+      .gte('start_at', dayStart)
+      .lte('start_at', dayEnd)
+    if (error || !data) return null
+    const WIN_BEFORE = 15 * 60 * 1000
+    const WIN_AFTER = 60 * 60 * 1000
+    // Tra i turni la cui finestra copre "adesso", scegli quello con end_at
+    // più vicino a now (il turno che stai effettivamente chiudendo).
+    const candidates = data.filter((s) => {
+      const start = new Date(s.start_at).getTime()
+      const end = new Date(s.end_at).getTime()
+      return nowMs >= start - WIN_BEFORE && nowMs <= end + WIN_AFTER
+    })
+    if (candidates.length === 0) return null
+    candidates.sort((a, b) =>
+      Math.abs(new Date(a.end_at).getTime() - nowMs) - Math.abs(new Date(b.end_at).getTime() - nowMs)
+    )
+    return candidates[0]
   }
 
   // Esegue l'insert vero e proprio. shiftId/outside/reason opzionali.
@@ -173,8 +205,8 @@ export default function Clock() {
     setError(null)
     setSuccess(null)
 
-    // Il controllo "fuori turno" vale SOLO per l'entrata (clock_in). Pausa e
-    // uscita sono conseguenza di un'entrata gia avvenuta: non ha senso avvisare.
+    // ENTRATA: controllo "fuori turno". Se non trova un turno nella finestra,
+    // chiede il motivo prima di timbrare; altrimenti aggancia lo shift.
     if (eventType === 'clock_in') {
       setSubmitting(true)
       try {
@@ -196,7 +228,24 @@ export default function Clock() {
       return
     }
 
-    // Pausa / uscita / ripresa: flusso normale.
+    // USCITA: aggancia il turno che stai chiudendo (serve al calcolo
+    // straordinario lato trigger). Se non trova un turno nella finestra,
+    // timbra comunque senza shift_id (il caso "uscita molto tardiva /
+    // dimenticata" viene gestito dal manager via i todo).
+    if (eventType === 'clock_out') {
+      setSubmitting(true)
+      try {
+        const shift = await findClosingShift()
+        await doInsert(eventType, shift ? { shiftId: shift.id } : {})
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
+    // Pausa / ripresa: flusso normale, nessun aggancio.
     setSubmitting(true)
     try {
       await doInsert(eventType)
