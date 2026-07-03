@@ -54,6 +54,11 @@ function buildStaffColorMap(staff = []) {
 export default function Planning() {
   const { profile } = useAuth()
   const isManager = profile?.is_manager
+  // Chi può vedere il planning completo (tutti i turni) in sola lettura:
+  // i manager, più i soci/responsabili esenti da timbratura. Questi ultimi
+  // vedono l'intera griglia ma NON possono modificarla (isManager resta false
+  // per tutti i controlli di editing).
+  const canViewAll = isManager || profile?.timbratura_esente === true
 
   const [viewMode, setViewMode] = useState('week') // 'week' | 'day'
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
@@ -416,7 +421,8 @@ export default function Planning() {
     }
   }, [shifts, viewMode, selectedDay])
 
-  if (!isManager) {
+  if (!canViewAll) {
+    // Dipendente standard: vede solo i propri turni pubblicati + quelli del partner.
     // I turni pubblicati del partner sono già presenti in `shifts` (la policy
     // RLS shifts_select lascia leggere a chiunque le righe status='published').
     // Filtro solo quelli del partner collegato.
@@ -432,6 +438,26 @@ export default function Planning() {
         partnerName={partner?.first_name || ''}
         approvedLeaves={approvedLeaves.filter((l) => l.staff_id === profile?.id)}
         events={events}
+        loading={loading}
+        onPrev={goPrev}
+        onNext={goNext}
+        onToday={goToday}
+      />
+    )
+  }
+
+  if (!isManager) {
+    // Socio/responsabile esente: vede TUTTI i turni della settimana in sola
+    // lettura (per sapere chi è di turno), senza alcun controllo di modifica.
+    return (
+      <ReadOnlyPlanningView
+        days={days}
+        staff={staff}
+        shiftsByStaffDay={shiftsByStaffDay}
+        conflictsByShift={conflictsByShift}
+        events={events}
+        staffColorMap={staffColorMap}
+        stats={stats}
         loading={loading}
         onPrev={goPrev}
         onNext={goNext}
@@ -1224,6 +1250,63 @@ function DailyShiftRow({ shift, onClick, staffColorMap }) {
 // ============================================================================
 // VISTA DIPENDENTE — calendario settimanale personale read-only
 // ============================================================================
+function ReadOnlyPlanningView({ days, staff, shiftsByStaffDay, conflictsByShift, events = [], staffColorMap, stats, loading, onPrev, onNext, onToday }) {
+  return (
+    <div>
+      {/* Header sola lettura: navigazione settimana, nessun controllo di modifica */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-4xl text-warm-dark mb-1">Planning</h1>
+          <p className="text-warm-brown font-sans text-sm capitalize">
+            {formatDayShort(days[0])} → {formatDayShort(days[6])}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cream-200 text-warm-brown font-sans text-xs font-semibold">
+            <Eye size={14} /> Sola lettura
+          </span>
+          <button onClick={onPrev} className="p-2 rounded-xl border border-cream-300 hover:bg-cream-100 text-warm-dark transition">
+            <ChevronLeft size={18} />
+          </button>
+          <button onClick={onToday} className="px-3 py-2 rounded-xl border border-cream-300 hover:bg-cream-100 text-warm-dark font-sans text-sm font-semibold transition">
+            Oggi
+          </button>
+          <button onClick={onNext} className="p-2 rounded-xl border border-cream-300 hover:bg-cream-100 text-warm-dark transition">
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <StatBox label="Turni della settimana" value={stats.totalShifts} />
+        <StatBox label="Ore totali" value={stats.totalHours.toFixed(1)} />
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12 text-warm-brown font-sans">Caricamento...</div>
+      ) : staff.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-cream-300 p-8 text-center">
+          <p className="font-sans text-warm-brown">Nessun dipendente attivo.</p>
+        </div>
+      ) : (
+        <DndContext>
+          <PlanningGrid
+            days={days}
+            staff={staff}
+            shiftsByStaffDay={shiftsByStaffDay}
+            conflictsByShift={conflictsByShift}
+            events={events}
+            staffColorMap={staffColorMap}
+            onCellClick={() => {}}
+            onShiftClick={() => {}}
+            isManager={false}
+          />
+        </DndContext>
+      )}
+    </div>
+  )
+}
+
 function EmployeePlanningView({ days, weekStart, myShifts, partnerShifts = [], partnerName = '', approvedLeaves, events = [], loading, onPrev, onNext, onToday }) {
   const [selectedShift, setSelectedShift] = useState(null)
 
