@@ -135,9 +135,8 @@ export default function Planning() {
 
     const [staffRes, rolesRes, shiftsRes, templatesRes, availRes, leavesRes, eventsRes] = await Promise.all([
       supabase
-        .from('staff_members')
-        .select('id, first_name, last_name, role_id, is_manager, roles(id, name, color)')
-        .eq('is_active', true)
+        .from('staff_roster')
+        .select('id, first_name, last_name, role_id')
         .order('first_name'),
       supabase
         .from('roles')
