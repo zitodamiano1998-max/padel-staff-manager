@@ -5,6 +5,7 @@ import {
   BarChart3, Calendar, Clock as ClockIcon, AlertCircle, CheckCircle2,
   Users, Moon, Sun, ArrowLeftRight, Palmtree, Search, Download,
   ChevronDown, ChevronUp, TrendingUp, TrendingDown, Euro,
+  AlertTriangle, Loader2, Check, RotateCcw,
 } from 'lucide-react'
 
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab']
@@ -25,6 +26,7 @@ export default function Stats() {
   const [expanded, setExpanded] = useState({
     volume: true,
     punctuality: true,
+    late_manage: true,
     reliability: true,
     team_health: true,
     costs: true,
@@ -133,6 +135,13 @@ export default function Stats() {
             <PunctualitySection data={data.punctuality || []} />
           </Section>
 
+          {/* GESTIONE RITARDI (azionabile) */}
+          <Section title="Gestione ritardi" subtitle="Penalizza sul comportamento: chi arriva spesso in ritardo"
+            icon={AlertTriangle}
+            expanded={expanded.late_manage} onToggle={() => toggle('late_manage')}>
+            <LateManageSection startDate={startDate} endDate={endDate} />
+          </Section>
+
           {/* RELIABILITY */}
           <Section title="Affidabilità" subtitle="Scambi, ferie, comportamenti"
             icon={ArrowLeftRight}
@@ -162,6 +171,174 @@ export default function Stats() {
 // ============================================================================
 // HELPERS
 // ============================================================================
+function LateManageSection({ startDate, endDate }) {
+  const [summary, setSummary] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [selected, setSelected] = useState(() => new Set()) // entry_id selezionati
+  const [openStaff, setOpenStaff] = useState(() => new Set()) // staff espansi
+  const [acting, setActing] = useState(false)
+
+  const fetchSummary = async () => {
+    if (!startDate || !endDate) return
+    setLoading(true)
+    setError(null)
+    const { data, error: err } = await supabase.rpc('late_behavior_summary', {
+      p_from: startDate,
+      p_to: endDate,
+    })
+    if (err) setError(err.message)
+    else setSummary(Array.isArray(data) ? data : [])
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchSummary()
+    setSelected(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate])
+
+  const toggleSel = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const toggleStaff = (id) => {
+    setOpenStaff((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const runAction = async (rpc) => {
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    setActing(true)
+    setError(null)
+    const { error: err } = await supabase.rpc(rpc, { p_entry_ids: ids })
+    setActing(false)
+    if (err) { setError(err.message); return }
+    setSelected(new Set())
+    await fetchSummary()
+  }
+
+  if (loading) return <div className="text-center py-8 text-warm-brown font-sans">Caricamento...</div>
+  if (error) return <div className="text-center py-6 text-red-700 font-sans text-sm">Errore: {error}</div>
+  if (!summary || summary.length === 0) {
+    return <div className="text-center py-8 text-warm-brown font-sans text-sm">Nessun ritardo nel periodo selezionato.</div>
+  }
+
+  const selCount = selected.size
+
+  return (
+    <div>
+      <p className="font-sans text-xs text-warm-brown mb-3">
+        I ritardi sono conteggiati dall’inizio turno (nessuna penalità automatica fino a +15 min).
+        Seleziona i ritardi di un dipendente e applica la penalità (+30 min) in base al comportamento.
+        I ritardi oltre +15 min sono già penalizzati automaticamente e non sono modificabili.
+      </p>
+
+      {/* Barra azioni */}
+      {selCount > 0 && (
+        <div className="flex items-center gap-2 mb-3 p-2 rounded-xl bg-cream-50 border border-cream-200">
+          <span className="font-sans text-sm text-warm-dark font-semibold ml-1">{selCount} selezionati</span>
+          <div className="flex-1" />
+          <button onClick={() => runAction('penalize_late')} disabled={acting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-sans text-sm font-semibold transition disabled:opacity-50">
+            {acting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Penalizza (+30)
+          </button>
+          <button onClick={() => runAction('restore_late')} disabled={acting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cream-300 hover:bg-cream-100 text-warm-dark font-sans text-sm font-semibold transition disabled:opacity-50">
+            {acting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Ripristina (S)
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {summary.map((s) => {
+          const isOpen = openStaff.has(s.staff_id)
+          return (
+            <div key={s.staff_id} className="rounded-xl border border-cream-200 overflow-hidden">
+              <button onClick={() => toggleStaff(s.staff_id)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-cream-50 transition text-left">
+                <div className="flex-1 min-w-0">
+                  <div className="font-sans font-semibold text-warm-dark">{s.staff_name}</div>
+                  <div className="font-sans text-xs text-warm-brown">
+                    {s.ritardi_totali} ritardi · media +{s.ritardo_medio_min} min
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {s.penalizzabili > 0 && (
+                    <span className="font-sans text-[10px] px-2 py-0.5 rounded-md bg-cream-100 border border-cream-300 text-warm-brown">
+                      {s.penalizzabili} da valutare
+                    </span>
+                  )}
+                  {s.penalizzati_manuale > 0 && (
+                    <span className="font-sans text-[10px] px-2 py-0.5 rounded-md bg-amber-100 border border-amber-300 text-amber-800">
+                      {s.penalizzati_manuale} penalizzati
+                    </span>
+                  )}
+                  {s.penalizzati_auto > 0 && (
+                    <span className="font-sans text-[10px] px-2 py-0.5 rounded-md bg-red-50 border border-red-200 text-red-700">
+                      {s.penalizzati_auto} auto
+                    </span>
+                  )}
+                </div>
+                {isOpen ? <ChevronUp size={16} className="text-warm-brown flex-shrink-0" /> : <ChevronDown size={16} className="text-warm-brown flex-shrink-0" />}
+              </button>
+
+              {isOpen && (
+                <div className="border-t border-cream-200 divide-y divide-cream-100">
+                  {(s.dettaglio || []).map((d) => {
+                    const selectable = d.stato === 'tollerato' || d.stato === 'penalizzato_manuale'
+                    const dt = new Date(d.event_time)
+                    return (
+                      <div key={d.entry_id}
+                        className={`flex items-center gap-3 px-4 py-2.5 ${selectable ? 'cursor-pointer hover:bg-cream-50' : 'opacity-60'}`}
+                        onClick={selectable ? () => toggleSel(d.entry_id) : undefined}>
+                        <input type="checkbox" readOnly
+                          checked={selected.has(d.entry_id)}
+                          disabled={!selectable}
+                          className="w-4 h-4 rounded accent-amber-600 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-sans text-sm text-warm-dark">
+                            {dt.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            {' · '}
+                            <span className="font-semibold">+{d.ritardo_min} min</span>
+                          </div>
+                          {d.late_reason && (
+                            <div className="font-sans text-xs text-warm-brown italic truncate">“{d.late_reason}”</div>
+                          )}
+                        </div>
+                        <LateStateBadge stato={d.stato} />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function LateStateBadge({ stato }) {
+  const map = {
+    tollerato: { t: 'da valutare', c: 'bg-cream-100 border-cream-300 text-warm-brown' },
+    penalizzato_manuale: { t: 'penalizzato', c: 'bg-amber-100 border-amber-300 text-amber-800' },
+    penalizzato_auto: { t: 'auto +30', c: 'bg-red-50 border-red-200 text-red-700' },
+  }
+  const s = map[stato] || map.tollerato
+  return (
+    <span className={`font-sans text-[10px] px-2 py-0.5 rounded-md border flex-shrink-0 ${s.c}`}>{s.t}</span>
+  )
+}
+
 function computeRange(preset, customStart, customEnd) {
   const today = new Date()
   let start, end, label
