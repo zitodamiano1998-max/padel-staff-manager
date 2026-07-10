@@ -49,8 +49,13 @@ export function computeWorkedMs(entries, nowDate) {
       // Le pause usano l'orario esatto (nessun arrotondamento)
       if (workStart === null) workStart = t
     } else if (e.event_type === 'break_start' || e.event_type === 'clock_out') {
-      // clock_out arrotondato; break_start esatto
-      if (e.event_type === 'clock_out') t = roundDateToHalfHour(t)
+      // clock_out: effective_time ha priorità (ora ufficiale decisa dal trigger:
+      // fine turno E, oppure E+30 se lo straordinario è stato concesso dal
+      // manager). Se assente (uscita senza turno agganciato), arrotonda.
+      // break_start: sempre esatto.
+      if (e.event_type === 'clock_out') {
+        t = e.effective_time ? new Date(e.effective_time) : roundDateToHalfHour(t)
+      }
       if (workStart !== null) {
         // Calcola solo se l'OUT è dopo l'IN; ignora coppie invertite/duplicate (Δ ≤ 0)
         if (t > workStart) total += t - workStart
