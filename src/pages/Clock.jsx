@@ -163,7 +163,7 @@ export default function Clock() {
   }
 
   // Esegue l'insert vero e proprio. shiftId/outside/reason/lateReason opzionali.
-  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null } = {}) => {
+  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null, overtimeReason = null } = {}) => {
     const pos = await getCurrentPosition()
 
     let distance = null
@@ -193,6 +193,7 @@ export default function Clock() {
     }
     if (shiftId) payload.shift_id = shiftId
     if (lateReason) payload.late_reason = lateReason
+    if (overtimeReason) payload.overtime_reason = overtimeReason
 
     const { error: insError } = await supabase.from('time_entries').insert(payload)
     if (insError) throw insError
@@ -251,7 +252,33 @@ export default function Clock() {
       setSubmitting(true)
       try {
         const shift = await findClosingShift()
-        await doInsert(eventType, shift ? { shiftId: shift.id } : {})
+        if (!shift) {
+          // Nessun turno agganciato (uscita molto tardiva/dimenticata):
+          // timbra senza shift_id, il manager la gestisce via todo.
+          await doInsert(eventType, {})
+          return
+        }
+        // Straordinario: minuti oltre la fine turno.
+        const extraMin = (Date.now() - new Date(shift.end_at).getTime()) / 60000
+        // Il MOTIVO è richiesto solo in fascia +26..+60 E solo se NON sei il
+        // chiudente (il chiudente è esente: stacca tardi per chiudere il centro
+        // e non deve giustificarsi). is_closing_shift è la stessa funzione che
+        // usa il trigger: unico punto di verità, niente logica duplicata.
+        if (extraMin >= 26 && extraMin <= 60) {
+          const { data: isClosing, error: closingErr } = await supabase
+            .rpc('is_closing_shift', { p_shift_id: shift.id })
+          if (closingErr) throw closingErr
+          if (!isClosing) {
+            // Non chiudente in fascia motivo: chiedi il motivo prima di timbrare.
+            setSubmitting(false)
+            setOutsideReason('')
+            setOutsidePrompt({ kind: 'overtime', eventType, shiftId: shift.id })
+            return
+          }
+        }
+        // Chiudente, oppure fasce senza motivo (+0..+25, o >60): timbra e
+        // aggancia. Il trigger decide esente / pending / conteggio.
+        await doInsert(eventType, { shiftId: shift.id })
       } catch (err) {
         setError(err.message)
       } finally {
@@ -283,6 +310,8 @@ export default function Clock() {
     try {
       if (prompt.kind === 'late') {
         await doInsert(prompt.eventType, { shiftId: prompt.shiftId, lateReason: reason })
+      } else if (prompt.kind === 'overtime') {
+        await doInsert(prompt.eventType, { shiftId: prompt.shiftId, overtimeReason: reason })
       } else {
         await doInsert(prompt.eventType, { outside: true, reason })
       }
@@ -433,12 +462,10 @@ export default function Clock() {
               </div>
               <div>
                 <h3 className="font-serif text-xl text-warm-dark">
-                  {outsidePrompt.kind === 'late' ? 'Sei in ritardo' : 'Non risulti di turno'}
+                  {PROMPT_TEXTS[outsidePrompt.kind].title}
                 </h3>
                 <p className="font-sans text-sm text-warm-brown mt-1">
-                  {outsidePrompt.kind === 'late'
-                    ? 'Hai timbrato l\u2019entrata in ritardo rispetto all\u2019inizio del turno. Le ore vengono comunque conteggiate dall\u2019inizio turno, ma indica il motivo: il responsabile lo vedr\u00e0.'
-                    : 'Non hai un turno pubblicato in questo momento. Puoi timbrare lo stesso, ma indica il motivo: il responsabile lo vedr\u00e0.'}
+                  {PROMPT_TEXTS[outsidePrompt.kind].desc}
                 </p>
               </div>
             </div>
@@ -451,9 +478,7 @@ export default function Clock() {
               onChange={(e) => setOutsideReason(e.target.value)}
               rows={3}
               autoFocus
-              placeholder={outsidePrompt.kind === 'late'
-                ? 'Es. traffico, imprevisto, mezzi in ritardo...'
-                : 'Es. copertura torneo, sostituzione al desk, copertura partita...'}
+              placeholder={PROMPT_TEXTS[outsidePrompt.kind].placeholder}
               className="w-full rounded-xl border border-cream-300 px-3 py-2 font-sans text-sm text-warm-dark focus:outline-none focus:ring-2 focus:ring-terracotta-300 resize-none"
             />
 
@@ -467,7 +492,7 @@ export default function Clock() {
                 onClick={confirmOutside}
                 disabled={!outsideReason.trim()}
                 className="flex-1 py-3 rounded-2xl font-sans font-semibold text-sm bg-terracotta-400 hover:bg-terracotta-500 text-white transition disabled:opacity-50 disabled:cursor-not-allowed">
-                {outsidePrompt.kind === 'late' ? 'Conferma' : 'Timbra comunque'}
+                {PROMPT_TEXTS[outsidePrompt.kind].confirm}
               </button>
             </div>
           </div>
@@ -565,6 +590,30 @@ function firstClockInTime(entries) {
 }
 
 // ---- Config tabelle ----
+
+// Testi del popup motivo, per tipo. 'outside' = timbratura fuori turno;
+// 'late' = entrata in ritardo (S+6..S+15); 'overtime' = uscita straordinario
+// (+26..+60, solo non-chiudenti).
+const PROMPT_TEXTS = {
+  outside: {
+    title: 'Non risulti di turno',
+    desc: 'Non hai un turno pubblicato in questo momento. Puoi timbrare lo stesso, ma indica il motivo: il responsabile lo vedrà.',
+    placeholder: 'Es. copertura torneo, sostituzione al desk, copertura partita...',
+    confirm: 'Timbra comunque',
+  },
+  late: {
+    title: 'Sei in ritardo',
+    desc: 'Hai timbrato l’entrata in ritardo rispetto all’inizio del turno. Le ore vengono comunque conteggiate dall’inizio turno, ma indica il motivo: il responsabile lo vedrà.',
+    placeholder: 'Es. traffico, imprevisto, mezzi in ritardo...',
+    confirm: 'Conferma',
+  },
+  overtime: {
+    title: 'Uscita oltre il turno',
+    desc: 'Hai timbrato l’uscita oltre l’orario di fine turno. Indica il motivo dello straordinario: il responsabile deciderà se riconoscerlo.',
+    placeholder: 'Es. richiesta cliente, chiusura cassa, imprevisto...',
+    confirm: 'Conferma',
+  },
+}
 
 const STATE_INFO = {
   not_started: {
