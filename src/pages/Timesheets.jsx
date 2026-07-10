@@ -598,8 +598,24 @@ function EntryRow({ entry, onEdit, onDelete, canEdit = true }) {
   const isManual = entry.latitude === null
 
   const realTime = t.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
-  const roundedTime = cfg.rounds ? formatTimeRounded(t) : null
-  const showRounding = cfg.rounds && roundedTime !== realTime
+  // Ora effettivamente conteggiata: priorità a effective_time (deciso dal
+  // trigger e/o dalla penalità manager), altrimenti l'arrotondamento.
+  const effDate = entry.effective_time ? new Date(entry.effective_time) : null
+  let roundedTime = null
+  let badgeTitle = 'Orario conteggiato per il calcolo ore'
+  if (effDate) {
+    roundedTime = effDate.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    if (entry.scheduled_start) {
+      const deltaMin = Math.round((effDate - new Date(entry.scheduled_start)) / 60000)
+      badgeTitle = deltaMin >= 30
+        ? 'Ritardo: conteggio posticipato di 30 minuti'
+        : 'Entrata agganciata all\u2019orario del turno'
+    }
+  } else if (cfg.rounds) {
+    roundedTime = formatTimeRounded(t)
+    badgeTitle = 'Orario arrotondato per il calcolo ore'
+  }
+  const showRounding = roundedTime !== null && roundedTime !== realTime
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/70 transition">
@@ -612,7 +628,7 @@ function EntryRow({ entry, onEdit, onDelete, canEdit = true }) {
           <span className="text-warm-brown ml-2 tabular-nums">{realTime}</span>
           {showRounding && (
             <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cream-100 border border-cream-200 font-sans text-[10px] tabular-nums text-warm-brown"
-              title="Orario arrotondato per il calcolo ore">
+              title={badgeTitle}>
               → <strong className="text-warm-dark">{roundedTime}</strong>
             </span>
           )}
