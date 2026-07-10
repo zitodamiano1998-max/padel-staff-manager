@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import {
   Palmtree, ArrowLeftRight, Search, FileEdit, AlertTriangle,
   CheckCircle2, ChevronRight, Loader2, Clock as ClockAlert,
-  Check, X,
+  Check,
 } from 'lucide-react'
 import TimeEntryFormModal from './TimeEntryFormModal'
 
@@ -19,7 +19,7 @@ export default function ManagerTodos() {
   const [missingModalOpen, setMissingModalOpen] = useState(false)
   const [missingPreset, setMissingPreset] = useState(null)
 
-  // Decisione ritardo in corso: { [entry_id]: 'confirm' | 'penalize' } mentre chiama la RPC
+  // Decisione straordinario in corso: { [entry_id]: 'confirm' | 'grant' }
   const [deciding, setDeciding] = useState({})
   const [decideError, setDecideError] = useState(null)
 
@@ -65,12 +65,12 @@ export default function ManagerTodos() {
 
   if (!todos) return null
 
-  const lateList = todos.late_decisions?.list || []
-  const lateCount = todos.late_decisions?.count || 0
+  const overtimeList = todos.overtime_decisions?.list || []
+  const overtimeCount = todos.overtime_decisions?.count || 0
 
-  // Stato vuoto: tutto a posto. Le decisioni-ritardo non sono in total_actions,
-  // quindi le controllo a parte: se ce ne sono, NON e' "tutto a posto".
-  if (todos.total_actions === 0 && lateCount === 0) {
+  // Stato vuoto: tutto a posto. Gli straordinari sono già inclusi in
+  // total_actions, quindi basta controllare quello.
+  if (todos.total_actions === 0) {
     return (
       <div className="bg-sage-50 border border-sage-200 rounded-2xl p-5 flex items-center gap-3">
         <CheckCircle2 size={22} className="text-sage-700 flex-shrink-0" />
@@ -113,17 +113,17 @@ export default function ManagerTodos() {
     await fetchTodos()
   }
 
-  // Decisione manager su timbratura in ritardo (finestra 6-10 min)
-  // p_decision: 'confirm' (vale da S) | 'penalize' (vale da S+30)
-  const handleLateDecision = async (entryId, decision) => {
+  // Decisione manager su straordinario uscita (fascia +15..+60)
+  // action: 'confirm' (conta fine turno E) | 'grant' (conta E+30)
+  const handleOvertimeDecision = async (entryId, action) => {
     setDecideError(null)
-    setDeciding((d) => ({ ...d, [entryId]: decision }))
-    const { data, error } = await supabase.rpc('decide_late_clockin', {
+    setDeciding((d) => ({ ...d, [entryId]: action }))
+    const { error } = await supabase.rpc('decide_overtime', {
       p_entry_id: entryId,
-      p_decision: decision,
+      p_action: action,
     })
-    if (error || !data?.ok) {
-      setDecideError(error?.message || data?.error || 'Errore nella decisione')
+    if (error) {
+      setDecideError(error.message || 'Errore nella decisione')
       setDeciding((d) => {
         const next = { ...d }
         delete next[entryId]
@@ -131,7 +131,7 @@ export default function ManagerTodos() {
       })
       return
     }
-    // Successo: ricarica: la card sparisce (late_pending ora false)
+    // Successo: ricarica: la card sparisce (overtime_pending ora false)
     await fetchTodos()
     setDeciding((d) => {
       const next = { ...d }
@@ -207,7 +207,7 @@ export default function ManagerTodos() {
           <div>
             <h3 className="font-serif text-xl text-warm-dark leading-tight">Cose da fare</h3>
             <p className="font-sans text-xs text-warm-brown mt-0.5">
-              {todos.total_actions + lateCount} {(todos.total_actions + lateCount) === 1 ? 'azione' : 'azioni'} in sospeso
+              {todos.total_actions} {todos.total_actions === 1 ? 'azione' : 'azioni'} in sospeso
             </p>
           </div>
         </div>
@@ -217,16 +217,16 @@ export default function ManagerTodos() {
           ))}
         </div>
 
-        {/* Timbrature in ritardo (6-10 min): decisione manager sul posto */}
-        {lateCount > 0 && (
+        {/* Straordinari uscita (+15..+60 min): decisione manager sul posto */}
+        {overtimeCount > 0 && (
           <div className={activeTiles.length > 0 ? 'mt-5 pt-5 border-t border-cream-200' : ''}>
             <div className="flex items-center gap-2 mb-3">
               <ClockAlert size={16} className="text-amber-600" />
               <h4 className="font-sans text-sm font-semibold text-warm-dark">
-                Timbrature in ritardo da approvare
+                Straordinari da approvare
               </h4>
               <span className="font-sans text-xs text-warm-brown">
-                ({lateCount})
+                ({overtimeCount})
               </span>
             </div>
             {decideError && (
@@ -235,12 +235,12 @@ export default function ManagerTodos() {
               </div>
             )}
             <div className="flex flex-col gap-2">
-              {lateList.map((item) => (
-                <LateDecisionCard
+              {overtimeList.map((item) => (
+                <OvertimeDecisionCard
                   key={item.entry_id}
                   item={item}
                   deciding={deciding[item.entry_id]}
-                  onDecide={handleLateDecision}
+                  onDecide={handleOvertimeDecision}
                 />
               ))}
             </div>
@@ -290,16 +290,16 @@ function TodoTile({ count, label, sub, onClick, tone, icon }) {
 }
 
 // ============================================================================
-// Card decisione timbratura in ritardo (finestra 6-10 min)
-function LateDecisionCard({ item, deciding, onDecide }) {
+// Card decisione straordinario uscita (+15..+60 min)
+// item: entry_id, staff_name, scheduled_end, event_time, extra_min, overtime_reason
+function OvertimeDecisionCard({ item, deciding, onDecide }) {
   const busy = !!deciding
-  // Orari in locale (Europe/Rome via browser): S e S+30
   const fmt = (iso) =>
     new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
-  const sched = new Date(item.scheduled_start)
-  const startLbl = fmt(item.scheduled_start)
-  const penalLbl = fmt(new Date(sched.getTime() + 30 * 60 * 1000))
-  const realLbl = fmt(item.event_time)
+  const end = new Date(item.scheduled_end)
+  const endLbl = fmt(item.scheduled_end)
+  const grantLbl = fmt(new Date(end.getTime() + 30 * 60 * 1000))
+  const outLbl = fmt(item.event_time)
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
@@ -309,8 +309,13 @@ function LateDecisionCard({ item, deciding, onDecide }) {
             {item.staff_name}
           </div>
           <div className="font-sans text-xs text-warm-brown mt-0.5">
-            Turno {startLbl} · timbrato {realLbl} ({item.ritardo_min} min di ritardo)
+            Fine turno {endLbl} · uscita {outLbl} (+{item.extra_min} min)
           </div>
+          {item.overtime_reason && (
+            <div className="font-sans text-xs text-warm-brown italic mt-1">
+              “{item.overtime_reason}”
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
@@ -320,16 +325,16 @@ function LateDecisionCard({ item, deciding, onDecide }) {
             {deciding === 'confirm'
               ? <Loader2 size={14} className="animate-spin" />
               : <Check size={14} />}
-            Conferma {startLbl}
+            Conferma {endLbl}
           </button>
           <button
-            onClick={() => onDecide(item.entry_id, 'penalize')}
+            onClick={() => onDecide(item.entry_id, 'grant')}
             disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 font-sans text-xs font-semibold transition disabled:opacity-50">
-            {deciding === 'penalize'
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+            {deciding === 'grant'
               ? <Loader2 size={14} className="animate-spin" />
-              : <X size={14} />}
-            Penalizza {penalLbl}
+              : <Check size={14} />}
+            Concedi +30 {grantLbl}
           </button>
         </div>
       </div>
