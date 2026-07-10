@@ -162,8 +162,8 @@ export default function Clock() {
     return candidates[0]
   }
 
-  // Esegue l'insert vero e proprio. shiftId/outside/reason opzionali.
-  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null } = {}) => {
+  // Esegue l'insert vero e proprio. shiftId/outside/reason/lateReason opzionali.
+  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null } = {}) => {
     const pos = await getCurrentPosition()
 
     let distance = null
@@ -192,6 +192,7 @@ export default function Clock() {
       outside_shift_reason: outside ? reason : null,
     }
     if (shiftId) payload.shift_id = shiftId
+    if (lateReason) payload.late_reason = lateReason
 
     const { error: insError } = await supabase.from('time_entries').insert(payload)
     if (insError) throw insError
@@ -212,13 +213,27 @@ export default function Clock() {
       try {
         const shift = await findCoveringShift()
         if (!shift) {
-          // Nessun turno nella finestra: apri il popup motivo, non timbrare ancora.
+          // Nessun turno nella finestra: apri il popup motivo "fuori turno".
           setSubmitting(false)
           setOutsideReason('')
-          setOutsidePrompt({ eventType })
+          setOutsidePrompt({ kind: 'outside', eventType })
           return
         }
-        // In turno: timbra e collega lo shift.
+        // Turno agganciato: calcolo il ritardo rispetto all'inizio turno.
+        // Fascia S+6..S+15 -> il motivo del ritardo è obbligatorio (popup).
+        // (Il confine è valutato lato client sull'ora del click; il trigger
+        // ricalcola effective_time sull'ora reale del server. Un eventuale
+        // scarto di pochi secondi sul bordo non crea incoerenze: il motivo
+        // resta salvato come dato anche se il server classifica di un minuto
+        // diverso.)
+        const lateMin = (Date.now() - new Date(shift.start_at).getTime()) / 60000
+        if (lateMin >= 6 && lateMin <= 15) {
+          setSubmitting(false)
+          setOutsideReason('')
+          setOutsidePrompt({ kind: 'late', eventType, shiftId: shift.id })
+          return
+        }
+        // In orario, tollerato (<=5) o oltre +15 (penalità automatica): timbra.
         await doInsert(eventType, { shiftId: shift.id })
       } catch (err) {
         setError(err.message)
@@ -256,15 +271,21 @@ export default function Clock() {
     }
   }
 
-  // Conferma dal popup "fuori turno": motivo obbligatorio.
+  // Conferma dal popup motivo (obbligatorio). Due casi:
+  //  - kind 'outside': timbratura fuori turno -> outside_shift_reason
+  //  - kind 'late'   : ritardo S+6..S+15 -> late_reason, con shift agganciato
   const confirmOutside = async () => {
     const reason = outsideReason.trim()
     if (!reason) return // bottone disabilitato, ma doppia sicurezza
-    const eventType = outsidePrompt.eventType
+    const prompt = outsidePrompt
     setOutsidePrompt(null)
     setSubmitting(true)
     try {
-      await doInsert(eventType, { outside: true, reason })
+      if (prompt.kind === 'late') {
+        await doInsert(prompt.eventType, { shiftId: prompt.shiftId, lateReason: reason })
+      } else {
+        await doInsert(prompt.eventType, { outside: true, reason })
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -411,10 +432,13 @@ export default function Clock() {
                 <CalendarX size={20} className="text-amber-600" />
               </div>
               <div>
-                <h3 className="font-serif text-xl text-warm-dark">Non risulti di turno</h3>
+                <h3 className="font-serif text-xl text-warm-dark">
+                  {outsidePrompt.kind === 'late' ? 'Sei in ritardo' : 'Non risulti di turno'}
+                </h3>
                 <p className="font-sans text-sm text-warm-brown mt-1">
-                  Non hai un turno pubblicato in questo momento. Puoi timbrare lo stesso,
-                  ma indica il motivo: il responsabile lo vedrà.
+                  {outsidePrompt.kind === 'late'
+                    ? 'Hai timbrato l\u2019entrata in ritardo rispetto all\u2019inizio del turno. Le ore vengono comunque conteggiate dall\u2019inizio turno, ma indica il motivo: il responsabile lo vedr\u00e0.'
+                    : 'Non hai un turno pubblicato in questo momento. Puoi timbrare lo stesso, ma indica il motivo: il responsabile lo vedr\u00e0.'}
                 </p>
               </div>
             </div>
@@ -427,7 +451,9 @@ export default function Clock() {
               onChange={(e) => setOutsideReason(e.target.value)}
               rows={3}
               autoFocus
-              placeholder="Es. copertura torneo, sostituzione al desk, copertura partita..."
+              placeholder={outsidePrompt.kind === 'late'
+                ? 'Es. traffico, imprevisto, mezzi in ritardo...'
+                : 'Es. copertura torneo, sostituzione al desk, copertura partita...'}
               className="w-full rounded-xl border border-cream-300 px-3 py-2 font-sans text-sm text-warm-dark focus:outline-none focus:ring-2 focus:ring-terracotta-300 resize-none"
             />
 
@@ -441,7 +467,7 @@ export default function Clock() {
                 onClick={confirmOutside}
                 disabled={!outsideReason.trim()}
                 className="flex-1 py-3 rounded-2xl font-sans font-semibold text-sm bg-terracotta-400 hover:bg-terracotta-500 text-white transition disabled:opacity-50 disabled:cursor-not-allowed">
-                Timbra comunque
+                {outsidePrompt.kind === 'late' ? 'Conferma' : 'Timbra comunque'}
               </button>
             </div>
           </div>
