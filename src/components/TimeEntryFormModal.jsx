@@ -62,6 +62,15 @@ export default function TimeEntryFormModal({ entry, staff, preset, onClose, onSa
         // Niente coordinate per timbratura manuale → trigger DB lascia distance/geofence a NULL
       }
 
+      // Se il modal è stato aperto da un flusso che conosce il turno (es. il
+      // todo "Timbrature mancanti" passa preset.shift_id), l'inserimento
+      // manuale DEVE portarlo: senza aggancio la timbratura non attraversa
+      // nessuna regola (niente scheduled_start/end, niente effective_time) e
+      // il turno resta con entrata/uscita orfana.
+      if (!isEdit && preset?.shift_id) {
+        payload.shift_id = preset.shift_id
+      }
+
       if (isEdit) {
         const { error } = await supabase
           .from('time_entries')

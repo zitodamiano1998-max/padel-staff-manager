@@ -47,6 +47,32 @@ export default function Clock() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id])
 
+  // L'app deve accorgersi delle timbrature inserite DA ALTRI (es. entrata
+  // manuale del manager per mancanza di connessione del dipendente): senza
+  // questo, lo stato resta congelato al mount e il dipendente vede "Pronto a
+  // iniziare" anche se la sua entrata esiste già nel database.
+  // Due canali: realtime (push dal DB, filtrato sul proprio staff_id) e
+  // refetch quando l'app torna in primo piano (copre anche i casi in cui il
+  // realtime non è attivo o la connessione era caduta).
+  useEffect(() => {
+    if (!profile?.id) return
+    const channel = supabase
+      .channel('clock-entries-' + profile.id)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'time_entries', filter: `staff_id=eq.${profile.id}` },
+        () => { fetchData() })
+      .subscribe()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchData()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id])
+
   const fetchData = async () => {
     setLoading(true)
     // Carico le ultime 24h (non solo "da mezzanotte"): un turno iniziato ieri
