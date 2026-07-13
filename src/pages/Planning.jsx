@@ -13,7 +13,7 @@ import CopyWeekModal from '../components/CopyWeekModal'
 import ShiftCompanions from '../components/ShiftCompanions'
 import EventsModal from '../components/EventsModal'
 import {
-  ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Grid3x3, BookCopy, AlertTriangle,
+  ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, CalendarDays, Grid3x3, BookCopy, AlertTriangle,
   Send, Pencil, Eye, Copy, Sparkles, Users,
 } from 'lucide-react'
 import {
@@ -60,9 +60,14 @@ export default function Planning() {
   // per tutti i controlli di editing).
   const canViewAll = isManager || profile?.timbratura_esente === true
 
-  const [viewMode, setViewMode] = useState('week') // 'week' | 'day'
+  const [viewMode, setViewMode] = useState('week') // 'week' | 'day' | 'month'
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
   const [selectedDay, setSelectedDay] = useState(() => new Date())
+  // Ancora della vista mensile: sempre il giorno 1 del mese mostrato.
+  const [monthAnchor, setMonthAnchor] = useState(() => {
+    const t = new Date()
+    return new Date(t.getFullYear(), t.getMonth(), 1)
+  })
 
   const [staff, setStaff] = useState([])
   const [shifts, setShifts] = useState([])
@@ -102,7 +107,8 @@ export default function Planning() {
 
   useEffect(() => {
     fetchData()
-  }, [weekStart])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStart, monthAnchor, viewMode])
 
   // Carica il partner collegato (chi mi ha come notify_partner_id). Una volta
   // per utente: la relazione non cambia settimana per settimana. Se la RLS non
@@ -125,13 +131,21 @@ export default function Planning() {
   const fetchData = async () => {
     setLoading(true)
 
-    // Range della settimana in timestamptz: [lun 00:00, lun+7d 00:00)
-    const weekStartISO = combineDateTime(formatDateISO(weekStart), '00:00').toISOString()
-    const weekEndISO = combineDateTime(formatDateISO(addDays(weekStart, 7)), '00:00').toISOString()
+    // Range del fetch in timestamptz. Settimana: [lun 00:00, lun+7g 00:00).
+    // Mese: l'intera griglia 6x7, dal lunedì della settimana che contiene il
+    // giorno 1 per 42 giorni — così anche i giorni "di bordo" fuori mese
+    // mostrano i loro turni. Le variabili mantengono i nomi week* perché
+    // tutte le query a valle le riusano.
+    const rangeStart = viewMode === 'month'
+      ? startOfWeek(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1))
+      : weekStart
+    const rangeDays = viewMode === 'month' ? 42 : 7
+    const weekStartISO = combineDateTime(formatDateISO(rangeStart), '00:00').toISOString()
+    const weekEndISO = combineDateTime(formatDateISO(addDays(rangeStart, rangeDays)), '00:00').toISOString()
 
     // Per le ferie usiamo solo le date (YYYY-MM-DD)
-    const weekStartDate = formatDateISO(weekStart)
-    const weekEndDate = formatDateISO(addDays(weekStart, 7))
+    const weekStartDate = formatDateISO(rangeStart)
+    const weekEndDate = formatDateISO(addDays(rangeStart, rangeDays))
 
     const [staffRes, rolesRes, shiftsRes, templatesRes, availRes, leavesRes, eventsRes] = await Promise.all([
       supabase
@@ -204,6 +218,26 @@ export default function Planning() {
     return map
   }, [shifts, availability, approvedLeaves])
 
+  // Giorni della griglia mensile: 6 settimane piene a partire dal lunedì
+  // della settimana che contiene il giorno 1 del mese.
+  const monthDays = useMemo(() => {
+    const first = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1)
+    const gridStart = startOfWeek(first)
+    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i))
+  }, [monthAnchor])
+
+  // Bucketing per giorno (vista mese): dateISO -> turni ordinati per inizio.
+  const shiftsByDay = useMemo(() => {
+    const map = new Map()
+    shifts.forEach((s) => {
+      const key = startDateOfShift(s.start_at)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(s)
+    })
+    map.forEach((list) => list.sort((a, b) => new Date(a.start_at) - new Date(b.start_at)))
+    return map
+  }, [shifts])
+
   const handleCellClick = (staffMember, day, timePreset) => {
     if (!isManager) return
     const preset = {
@@ -233,8 +267,19 @@ export default function Planning() {
   }
 
   const handleNewClick = () => {
+    // In vista mese: oggi se il mese mostrato è quello corrente, altrimenti il giorno 1.
+    const monthDefault = () => {
+      const t = new Date()
+      return (t.getFullYear() === monthAnchor.getFullYear() && t.getMonth() === monthAnchor.getMonth())
+        ? t
+        : new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1)
+    }
     setPresetCell({
-      date: formatDateISO(viewMode === 'day' ? selectedDay : days[0]),
+      date: formatDateISO(
+        viewMode === 'day' ? selectedDay
+        : viewMode === 'month' ? monthDefault()
+        : days[0]
+      ),
     })
     setEditingShift(null)
     setModalOpen(true)
@@ -342,9 +387,12 @@ export default function Planning() {
     const today = new Date()
     setWeekStart(startOfWeek(today))
     setSelectedDay(today)
+    setMonthAnchor(new Date(today.getFullYear(), today.getMonth(), 1))
   }
   const goPrev = () => {
-    if (viewMode === 'week') setWeekStart(subDays(weekStart, 7))
+    if (viewMode === 'month') {
+      setMonthAnchor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))
+    } else if (viewMode === 'week') setWeekStart(subDays(weekStart, 7))
     else {
       const prev = subDays(selectedDay, 1)
       setSelectedDay(prev)
@@ -353,7 +401,9 @@ export default function Planning() {
     }
   }
   const goNext = () => {
-    if (viewMode === 'week') setWeekStart(addDays(weekStart, 7))
+    if (viewMode === 'month') {
+      setMonthAnchor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))
+    } else if (viewMode === 'week') setWeekStart(addDays(weekStart, 7))
     else {
       const next = addDays(selectedDay, 1)
       setSelectedDay(next)
@@ -407,9 +457,15 @@ export default function Planning() {
 
   const stats = useMemo(() => {
     const target = viewMode === 'day' ? formatDateISO(selectedDay) : null
-    const list = target
+    let list = target
       ? shifts.filter((s) => startDateOfShift(s.start_at) === target)
       : shifts
+    if (viewMode === 'month') {
+      // In vista mese il fetch copre 42 giorni (bordi inclusi): i numeri
+      // devono contare solo il mese mostrato.
+      const prefix = `${monthAnchor.getFullYear()}-${String(monthAnchor.getMonth() + 1).padStart(2, '0')}-`
+      list = shifts.filter((s) => startDateOfShift(s.start_at).startsWith(prefix))
+    }
     const totalHours = list.reduce(
       (acc, s) => acc + calcHoursFromTimestamps(s.start_at, s.end_at, s.break_minutes), 0
     )
@@ -418,7 +474,7 @@ export default function Planning() {
       totalHours,
       draft: list.filter((s) => s.status === 'draft').length,
     }
-  }, [shifts, viewMode, selectedDay])
+  }, [shifts, viewMode, selectedDay, monthAnchor])
 
   if (!canViewAll) {
     // Dipendente standard: vede solo i propri turni pubblicati + quelli del partner.
@@ -474,6 +530,8 @@ export default function Planning() {
           <p className="text-warm-brown font-sans text-sm capitalize">
             {viewMode === 'week'
               ? `${formatDayShort(days[0])} → ${formatDayShort(days[6])}`
+              : viewMode === 'month'
+              ? monthAnchor.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
               : formatDayLong(selectedDay)}
           </p>
         </div>
@@ -491,6 +549,12 @@ export default function Planning() {
                 viewMode === 'day' ? 'bg-white text-warm-dark shadow-sm' : 'text-warm-brown hover:text-warm-dark'
               }`}>
               <CalendarIcon size={14} /> Giorno
+            </button>
+            <button onClick={() => setViewMode('month')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-sans text-sm font-semibold transition ${
+                viewMode === 'month' ? 'bg-white text-warm-dark shadow-sm' : 'text-warm-brown hover:text-warm-dark'
+              }`}>
+              <CalendarDays size={14} /> Mese
             </button>
           </div>
 
@@ -567,7 +631,7 @@ export default function Planning() {
       )}
 
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <StatBox label={viewMode === 'day' ? 'Turni del giorno' : 'Turni della settimana'} value={stats.totalShifts} />
+        <StatBox label={viewMode === 'day' ? 'Turni del giorno' : viewMode === 'month' ? 'Turni del mese' : 'Turni della settimana'} value={stats.totalShifts} />
         <StatBox label="Ore totali" value={stats.totalHours.toFixed(1)} />
         <StatBox label="In bozza" value={stats.draft} accent={stats.draft > 0 ? 'amber' : null} />
       </div>
@@ -580,6 +644,24 @@ export default function Planning() {
             Nessun dipendente attivo. Aggiungi dipendenti dall'<strong>Anagrafica</strong>.
           </p>
         </div>
+      ) : viewMode === 'month' ? (
+        <MonthGrid
+          days={monthDays}
+          monthAnchor={monthAnchor}
+          shiftsByDay={shiftsByDay}
+          conflictsByShift={conflictsByShift}
+          approvedLeaves={approvedLeaves}
+          events={events}
+          staffColorMap={staffColorMap}
+          isManager={isManager}
+          onCellClick={(day) => handleCellClick(null, day)}
+          onShiftClick={handleShiftClick}
+          onDayOpen={(day) => {
+            setSelectedDay(day)
+            setWeekStart(startOfWeek(day))
+            setViewMode('day')
+          }}
+        />
       ) : viewMode === 'week' ? (
         <DndContext
           sensors={sensors}
@@ -1805,5 +1887,120 @@ function EventCard({ event }) {
         )}
       </div>
     </div>
+  )
+}
+
+// ============================================================================
+// MONTH GRID (vista mensile manager)
+// Griglia calendario 6x7, editabile per i turni: click su cella vuota apre
+// ShiftFormModal con il giorno precompilato; click su un chip apre la
+// modifica del turno. Niente drag&drop tra giorni: per spostare si usa la
+// vista settimana. "+N altri" apre la vista giorno. Ferie, eventi, bozze e
+// conflitti sono segnalati nella cella.
+// ============================================================================
+const MONTH_MAX_CHIPS = 3
+
+function MonthGrid({ days, monthAnchor, shiftsByDay, conflictsByShift, approvedLeaves, events, staffColorMap, isManager, onCellClick, onShiftClick, onDayOpen }) {
+  const monthIdx = monthAnchor.getMonth()
+  const weekdayLabels = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom']
+
+  const leavesForDay = (dateISO) =>
+    approvedLeaves.filter((l) => l.start_date <= dateISO && l.end_date >= dateISO)
+
+  const eventsForDay = (dateISO) =>
+    events.filter((ev) => ev.start_date <= dateISO && ev.end_date >= dateISO)
+
+  return (
+    <div className="bg-white rounded-2xl border border-cream-300 overflow-hidden">
+      <div className="grid grid-cols-7 border-b border-cream-300 bg-cream-50">
+        {weekdayLabels.map((w) => (
+          <div key={w} className="px-2 py-2 text-center font-sans text-xs font-semibold uppercase tracking-wider text-warm-brown">
+            {w}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {days.map((day, i) => {
+          const dateISO = formatDateISO(day)
+          const inMonth = day.getMonth() === monthIdx
+          const today = isToday(day)
+          const dayShifts = shiftsByDay.get(dateISO) || []
+          const visible = dayShifts.slice(0, MONTH_MAX_CHIPS)
+          const hiddenCount = dayShifts.length - visible.length
+          const dayLeaves = leavesForDay(dateISO)
+          const dayEvents = eventsForDay(dateISO)
+
+          return (
+            <div key={dateISO}
+              onClick={() => { if (isManager) onCellClick(day) }}
+              className={`min-h-[112px] border-b border-r border-cream-200 p-1.5 flex flex-col gap-1 transition ${
+                inMonth ? 'bg-white' : 'bg-cream-50/60'
+              } ${isManager ? 'cursor-pointer hover:bg-cream-50' : ''} ${
+                (i + 1) % 7 === 0 ? 'border-r-0' : ''
+              }`}>
+              <div className="flex items-center justify-between">
+                <span className={`font-sans text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full ${
+                  today
+                    ? 'bg-terracotta-400 text-white'
+                    : inMonth ? 'text-warm-dark' : 'text-warm-brown/50'
+                }`}>
+                  {day.getDate()}
+                </span>
+                <div className="flex items-center gap-1">
+                  {dayEvents.map((ev) => (
+                    <span key={ev.id} title={`✦ ${ev.name}`}
+                      className="w-2 h-2 rounded-sm flex-shrink-0"
+                      style={{ backgroundColor: ev.color }} />
+                  ))}
+                  {dayLeaves.length > 0 && (
+                    <span title={`${dayLeaves.length} in ferie/permesso`}
+                      className="font-sans text-[10px] font-semibold text-sage-700 bg-sage-50 border border-sage-200 rounded px-1">
+                      🌴{dayLeaves.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {visible.map((s) => (
+                <MonthShiftChip
+                  key={s.id}
+                  shift={s}
+                  color={staffColorMap[s.staff_id] || colorForStaff(s.staff_id)}
+                  hasConflict={conflictsByShift.has(s.id)}
+                  onClick={(e) => onShiftClick(e, s)}
+                />
+              ))}
+
+              {hiddenCount > 0 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDayOpen(day) }}
+                  className="font-sans text-[11px] font-semibold text-warm-brown hover:text-warm-dark text-left px-1">
+                  +{hiddenCount} altri
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function MonthShiftChip({ shift, color, hasConflict, onClick }) {
+  const isDraft = shift.status === 'draft'
+  const name = shift.staff_members?.first_name || '—'
+  return (
+    <button
+      onClick={onClick}
+      title={`${name} · ${formatTimeFromISO(shift.start_at)}–${formatTimeFromISO(shift.end_at)}${isDraft ? ' · bozza' : ''}${hasConflict ? ' · conflitto' : ''}`}
+      className={`w-full flex items-center gap-1 rounded-md px-1.5 py-0.5 text-left font-sans text-[11px] font-semibold text-white truncate ${
+        isDraft ? 'opacity-70 border border-dashed border-white/70' : ''
+      }`}
+      style={{ backgroundColor: color }}>
+      <span className="tabular-nums flex-shrink-0">{formatTimeFromISO(shift.start_at)}</span>
+      <span className="truncate">{name}</span>
+      {hasConflict && <AlertTriangle size={10} className="flex-shrink-0 text-amber-200" />}
+      {isDraft && <span className="flex-shrink-0 text-[9px] uppercase">B</span>}
+    </button>
   )
 }
