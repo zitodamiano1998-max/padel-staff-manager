@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import {
   Palmtree, ArrowLeftRight, Search, FileEdit, AlertTriangle,
   CheckCircle2, ChevronRight, Loader2, Clock as ClockAlert,
-  Check,
+  Check, LogOut,
 } from 'lucide-react'
 import TimeEntryFormModal from './TimeEntryFormModal'
 
@@ -12,6 +12,7 @@ export default function ManagerTodos() {
   const navigate = useNavigate()
   const [todos, setTodos] = useState(null)
   const [staffList, setStaffList] = useState([])
+  const [earlyList, setEarlyList] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -19,19 +20,25 @@ export default function ManagerTodos() {
   const [missingModalOpen, setMissingModalOpen] = useState(false)
   const [missingPreset, setMissingPreset] = useState(null)
 
-  // Decisione straordinario in corso: { [entry_id]: 'confirm' | 'grant' }
+  // Decisione in corso: { [entry_id]: 'confirm' | 'grant' | 'real' | 'scheduled' | 'custom' }
   const [deciding, setDeciding] = useState({})
   const [decideError, setDecideError] = useState(null)
 
   const fetchTodos = async () => {
     setLoading(true)
     setError(null)
-    const [todosRes, staffRes] = await Promise.all([
+    // Le uscite anticipate arrivano da una query diretta (non da
+    // get_manager_todos): niente RPC da estendere colonna per colonna.
+    const [todosRes, staffRes, earlyRes] = await Promise.all([
       supabase.rpc('get_manager_todos'),
       supabase.from('staff_members')
         .select('id, first_name, last_name')
         .eq('is_active', true)
         .order('first_name'),
+      supabase.from('time_entries')
+        .select('id, staff_id, event_time, scheduled_end, early_exit_reason, staff_members(first_name, last_name)')
+        .eq('early_exit_pending', true)
+        .order('event_time', { ascending: false }),
     ])
     setLoading(false)
     if (todosRes.error) {
@@ -40,6 +47,7 @@ export default function ManagerTodos() {
     }
     setTodos(todosRes.data)
     if (staffRes.data) setStaffList(staffRes.data)
+    setEarlyList(earlyRes.data || [])
   }
 
   useEffect(() => {
@@ -67,10 +75,11 @@ export default function ManagerTodos() {
 
   const overtimeList = todos.overtime_decisions?.list || []
   const overtimeCount = todos.overtime_decisions?.count || 0
+  const earlyCount = earlyList.length
 
-  // Stato vuoto: tutto a posto. Gli straordinari sono già inclusi in
-  // total_actions, quindi basta controllare quello.
-  if (todos.total_actions === 0) {
+  // Stato vuoto: tutto a posto. Gli straordinari sono già in total_actions;
+  // le uscite anticipate arrivano dalla query diretta, quindi vanno sommate.
+  if (todos.total_actions === 0 && earlyCount === 0) {
     return (
       <div className="bg-sage-50 border border-sage-200 rounded-2xl p-5 flex items-center gap-3">
         <CheckCircle2 size={22} className="text-sage-700 flex-shrink-0" />
@@ -83,6 +92,8 @@ export default function ManagerTodos() {
       </div>
     )
   }
+
+  const totalActions = (todos.total_actions || 0) + earlyCount
 
   // Click handler per "Timbrature mancanti" → apre modal precompilato per il primo
   const openMissingClockModal = () => {
@@ -113,7 +124,7 @@ export default function ManagerTodos() {
     await fetchTodos()
   }
 
-  // Decisione manager su straordinario uscita (fascia +15..+60)
+  // Decisione manager su straordinario uscita (oltre +14)
   // action: 'confirm' (conta fine turno E) | 'grant' (conta E+30)
   const handleOvertimeDecision = async (entryId, action) => {
     setDecideError(null)
@@ -132,6 +143,34 @@ export default function ManagerTodos() {
       return
     }
     // Successo: ricarica: la card sparisce (overtime_pending ora false)
+    await fetchTodos()
+    setDeciding((d) => {
+      const next = { ...d }
+      delete next[entryId]
+      return next
+    })
+  }
+
+  // Decisione manager su uscita anticipata (prima di F-15)
+  // mode: 'real' (orario reale) | 'scheduled' (fine turno) | 'custom' (orario scelto)
+  const handleEarlyDecision = async (entryId, mode, customTime = null) => {
+    setDecideError(null)
+    setDeciding((d) => ({ ...d, [entryId]: mode }))
+    const { error } = await supabase.rpc('decide_early_exit', {
+      p_entry_id: entryId,
+      p_mode: mode,
+      p_custom_time: customTime,
+    })
+    if (error) {
+      setDecideError(error.message || 'Errore nella decisione')
+      setDeciding((d) => {
+        const next = { ...d }
+        delete next[entryId]
+        return next
+      })
+      return
+    }
+    // Successo: ricarica: la card sparisce (early_exit_pending ora false)
     await fetchTodos()
     setDeciding((d) => {
       const next = { ...d }
@@ -207,7 +246,7 @@ export default function ManagerTodos() {
           <div>
             <h3 className="font-serif text-xl text-warm-dark leading-tight">Cose da fare</h3>
             <p className="font-sans text-xs text-warm-brown mt-0.5">
-              {todos.total_actions} {todos.total_actions === 1 ? 'azione' : 'azioni'} in sospeso
+              {totalActions} {totalActions === 1 ? 'azione' : 'azioni'} in sospeso
             </p>
           </div>
         </div>
@@ -217,7 +256,14 @@ export default function ManagerTodos() {
           ))}
         </div>
 
-        {/* Straordinari uscita (+15..+60 min): decisione manager sul posto */}
+        {/* Errore decisioni (condiviso tra straordinari e uscite anticipate) */}
+        {decideError && (
+          <div className="mt-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700 font-sans text-xs">
+            {decideError}
+          </div>
+        )}
+
+        {/* Straordinari uscita (oltre +14 min): decisione manager sul posto */}
         {overtimeCount > 0 && (
           <div className={activeTiles.length > 0 ? 'mt-5 pt-5 border-t border-cream-200' : ''}>
             <div className="flex items-center gap-2 mb-3">
@@ -229,11 +275,6 @@ export default function ManagerTodos() {
                 ({overtimeCount})
               </span>
             </div>
-            {decideError && (
-              <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700 font-sans text-xs">
-                {decideError}
-              </div>
-            )}
             <div className="flex flex-col gap-2">
               {overtimeList.map((item) => (
                 <OvertimeDecisionCard
@@ -241,6 +282,31 @@ export default function ManagerTodos() {
                   item={item}
                   deciding={deciding[item.entry_id]}
                   onDecide={handleOvertimeDecision}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Uscite anticipate (prima di F-15): il manager decide l'orario da contare */}
+        {earlyCount > 0 && (
+          <div className={(activeTiles.length > 0 || overtimeCount > 0) ? 'mt-5 pt-5 border-t border-cream-200' : ''}>
+            <div className="flex items-center gap-2 mb-3">
+              <LogOut size={16} className="text-terracotta-500" />
+              <h4 className="font-sans text-sm font-semibold text-warm-dark">
+                Uscite anticipate da decidere
+              </h4>
+              <span className="font-sans text-xs text-warm-brown">
+                ({earlyCount})
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {earlyList.map((item) => (
+                <EarlyExitDecisionCard
+                  key={item.id}
+                  item={item}
+                  deciding={deciding[item.id]}
+                  onDecide={handleEarlyDecision}
                 />
               ))}
             </div>
@@ -290,7 +356,7 @@ function TodoTile({ count, label, sub, onClick, tone, icon }) {
 }
 
 // ============================================================================
-// Card decisione straordinario uscita (+15..+60 min)
+// Card decisione straordinario uscita (oltre +14 min)
 // item: entry_id, staff_name, scheduled_end, event_time, extra_min, overtime_reason
 function OvertimeDecisionCard({ item, deciding, onDecide }) {
   const busy = !!deciding
@@ -336,6 +402,96 @@ function OvertimeDecisionCard({ item, deciding, onDecide }) {
               : <Check size={14} />}
             Concedi +30 {grantLbl}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Card decisione uscita anticipata (prima di F-15)
+// item: id, event_time, scheduled_end, early_exit_reason, staff_members{first_name,last_name}
+// Tre esiti: orario reale / fine turno / orario scelto dal manager.
+function EarlyExitDecisionCard({ item, deciding, onDecide }) {
+  const [customTime, setCustomTime] = useState('')
+  const busy = !!deciding
+  const fmt = (iso) =>
+    new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  const outLbl = fmt(item.event_time)
+  const endLbl = fmt(item.scheduled_end)
+  const anticipoMin = Math.round(
+    (new Date(item.scheduled_end).getTime() - new Date(item.event_time).getTime()) / 60000
+  )
+  const staffName = item.staff_members
+    ? `${item.staff_members.first_name} ${item.staff_members.last_name}`
+    : '—'
+
+  // Costruisce l'ISO dell'orario scelto sullo stesso giorno (locale) della
+  // fine turno, così il manager digita solo HH:MM.
+  const applyCustom = () => {
+    if (!customTime) return
+    const [h, m] = customTime.split(':').map(Number)
+    const d = new Date(item.scheduled_end)
+    d.setHours(h, m, 0, 0)
+    onDecide(item.id, 'custom', d.toISOString())
+  }
+
+  return (
+    <div className="bg-terracotta-50 border border-terracotta-200 rounded-xl px-4 py-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-sans text-sm font-semibold text-warm-dark truncate">
+            {staffName}
+          </div>
+          <div className="font-sans text-xs text-warm-brown mt-0.5">
+            Fine turno {endLbl} · uscito {outLbl} (−{anticipoMin} min)
+          </div>
+          {item.early_exit_reason && (
+            <div className="font-sans text-xs text-warm-brown italic mt-1">
+              “{item.early_exit_reason}”
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onDecide(item.id, 'real')}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage-100 hover:bg-sage-200 border border-sage-300 text-sage-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+              {deciding === 'real'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Conta {outLbl}
+            </button>
+            <button
+              onClick={() => onDecide(item.id, 'scheduled')}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+              {deciding === 'scheduled'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Conta fine turno {endLbl}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-sans text-xs text-warm-brown">Altro orario:</span>
+            <input
+              type="time"
+              value={customTime}
+              onChange={(e) => setCustomTime(e.target.value)}
+              disabled={busy}
+              className="rounded-lg border border-cream-300 px-2 py-1 font-sans text-xs text-warm-dark focus:outline-none focus:ring-2 focus:ring-terracotta-300 disabled:opacity-50"
+            />
+            <button
+              onClick={applyCustom}
+              disabled={busy || !customTime}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cream-100 hover:bg-cream-200 border border-cream-300 text-warm-dark font-sans text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
+              {deciding === 'custom'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Applica
+            </button>
+          </div>
         </div>
       </div>
     </div>

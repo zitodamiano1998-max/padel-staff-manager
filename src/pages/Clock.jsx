@@ -15,6 +15,11 @@ import {
 const MATCH_WIN_BEFORE_MS = 60 * 60 * 1000 // inizio − 60 min
 const MATCH_WIN_AFTER_MS = 60 * 60 * 1000  // fine + 60 min
 
+// Uscita anticipata: oltre questa soglia (minuti prima della fine turno)
+// il motivo è obbligatorio e la decisione sull'orario passa al manager.
+// F-15..F è tolleranza: conta F, nessun popup. Stessa soglia del trigger.
+const EARLY_EXIT_THRESHOLD_MIN = 15
+
 export default function Clock() {
   const { profile } = useAuth()
 
@@ -176,7 +181,7 @@ export default function Clock() {
   }
 
   // Esegue l'insert vero e proprio. shiftId/outside/reason/lateReason opzionali.
-  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null, overtimeReason = null } = {}) => {
+  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null, overtimeReason = null, earlyExitReason = null } = {}) => {
     const pos = await getCurrentPosition()
 
     let distance = null
@@ -207,6 +212,7 @@ export default function Clock() {
     if (shiftId) payload.shift_id = shiftId
     if (lateReason) payload.late_reason = lateReason
     if (overtimeReason) payload.overtime_reason = overtimeReason
+    if (earlyExitReason) payload.early_exit_reason = earlyExitReason
 
     const { error: insError } = await supabase.from('time_entries').insert(payload)
     if (insError) throw insError
@@ -272,9 +278,20 @@ export default function Clock() {
           await doInsert(eventType, {})
           return
         }
-        // Straordinario: minuti oltre la fine turno.
+        // Minuti rispetto alla fine turno: negativi = anticipo.
         const extraMin = (Date.now() - new Date(shift.end_at).getTime()) / 60000
-        // Il MOTIVO è richiesto solo in fascia +26..+60 E solo se NON sei il
+
+        // USCITA ANTICIPATA oltre la tolleranza (F-15): motivo obbligatorio.
+        // Il trigger marca early_exit_pending: l'orario da contare lo decide
+        // il manager dalla coda decisioni (provvisorio = orario reale).
+        if (extraMin < -EARLY_EXIT_THRESHOLD_MIN) {
+          setSubmitting(false)
+          setOutsideReason('')
+          setOutsidePrompt({ kind: 'early_exit', eventType, shiftId: shift.id })
+          return
+        }
+
+        // Straordinario: il MOTIVO è richiesto solo in fascia +26..+60 E solo se NON sei il
         // chiudente (il chiudente è esente: stacca tardi per chiudere il centro
         // e non deve giustificarsi). is_closing_shift è la stessa funzione che
         // usa il trigger: unico punto di verità, niente logica duplicata.
@@ -326,6 +343,8 @@ export default function Clock() {
         await doInsert(prompt.eventType, { shiftId: prompt.shiftId, lateReason: reason })
       } else if (prompt.kind === 'overtime') {
         await doInsert(prompt.eventType, { shiftId: prompt.shiftId, overtimeReason: reason })
+      } else if (prompt.kind === 'early_exit') {
+        await doInsert(prompt.eventType, { shiftId: prompt.shiftId, earlyExitReason: reason })
       } else {
         await doInsert(prompt.eventType, { outside: true, reason })
       }
@@ -625,6 +644,12 @@ const PROMPT_TEXTS = {
     title: 'Uscita oltre il turno',
     desc: 'Hai timbrato l\u2019uscita oltre l\u2019orario di fine turno. Indica il motivo dello straordinario: il responsabile deciderà se riconoscerlo.',
     placeholder: 'Es. richiesta cliente, chiusura cassa, imprevisto...',
+    confirm: 'Conferma',
+  },
+  early_exit: {
+    title: 'Stai uscendo in anticipo',
+    desc: 'Stai timbrando l\u2019uscita molto prima della fine del turno. Indica il motivo: il responsabile deciderà fino a che ora conteggiare le ore.',
+    placeholder: 'Es. chiusura anticipata, permesso concordato, imprevisto...',
     confirm: 'Conferma',
   },
 }
