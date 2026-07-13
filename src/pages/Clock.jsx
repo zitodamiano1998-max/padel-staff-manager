@@ -7,6 +7,14 @@ import {
   Play, Pause, Square, Coffee, MapPin, AlertTriangle, CheckCircle2, Clock as ClockIcon, Loader2, CalendarX,
 } from 'lucide-react'
 
+// Finestra di aggancio turno (entrata e uscita).
+// PRIMA: inizio − 15 min. Un'entrata a S−15:16 restava senza turno (turno
+// "orfano" con sola uscita agganciata). Chi arriva presto non guadagna nulla
+// comunque — il trigger conta da S — quindi allargare l'aggancio non regala
+// minuti: evita solo gli orfani.
+const MATCH_WIN_BEFORE_MS = 60 * 60 * 1000 // inizio − 60 min
+const MATCH_WIN_AFTER_MS = 60 * 60 * 1000  // fine + 60 min
+
 export default function Clock() {
   const { profile } = useAuth()
 
@@ -104,12 +112,15 @@ export default function Clock() {
   const workedM = Math.floor((workedMs % 3600000) / 60000)
 
   // Cerca un turno PUBBLICATO del dipendente che "copra" adesso, con tolleranza:
-  // inizio - 15 min  <=  now  <=  fine + 60 min. Ritorna lo shift o null.
-  // Usato per l'ENTRATA: aggancia il turno la cui finestra copre adesso.
+  // inizio - 60 min  <=  now  <=  fine + 60 min. Ritorna lo shift o null.
+  // Usato per l'ENTRATA.
+  // Con la finestra larga, nei turni spezzati (es. 08-13 e 14-18) le finestre
+  // possono sovrapporsi: tra i candidati vince il turno con INIZIO più vicino
+  // ad adesso (non il "primo match", che dipende dall'ordine arbitrario del DB).
   const findCoveringShift = async () => {
     const nowMs = Date.now()
-    // Prendo i turni pubblicati di oggi-intorno e filtro in JS sulla finestra
-    // (start - 15min <= now <= end + 60min). Range largo per sicurezza.
+    // Prendo i turni pubblicati di oggi-intorno e filtro in JS sulla finestra.
+    // Range largo per sicurezza.
     const dayStart = new Date(nowMs - 24 * 3600 * 1000).toISOString()
     const dayEnd = new Date(nowMs + 24 * 3600 * 1000).toISOString()
     const { data, error } = await supabase
@@ -120,20 +131,24 @@ export default function Clock() {
       .gte('start_at', dayStart)
       .lte('start_at', dayEnd)
     if (error || !data) return null
-    const WIN_BEFORE = 15 * 60 * 1000
-    const WIN_AFTER = 60 * 60 * 1000
-    const match = data.find((s) => {
+    const candidates = data.filter((s) => {
       const start = new Date(s.start_at).getTime()
       const end = new Date(s.end_at).getTime()
-      return nowMs >= start - WIN_BEFORE && nowMs <= end + WIN_AFTER
+      return nowMs >= start - MATCH_WIN_BEFORE_MS && nowMs <= end + MATCH_WIN_AFTER_MS
     })
-    return match || null
+    if (candidates.length === 0) return null
+    candidates.sort((a, b) =>
+      Math.abs(new Date(a.start_at).getTime() - nowMs) - Math.abs(new Date(b.start_at).getTime() - nowMs)
+    )
+    return candidates[0]
   }
 
   // Come findCoveringShift ma per l'USCITA: aggancia il turno la cui FINE è
-  // più vicina all'orario attuale, entro la finestra start-15min / end+60min.
+  // più vicina all'orario attuale, entro la finestra start-60min / end+60min.
   // L'uscita chiude il turno appena terminato, quindi il criterio è end_at,
   // non start_at. Ritorna { id, start_at, end_at } o null.
+  // La finestra iniziale è la stessa dell'entrata: un'entrata agganciata deve
+  // sempre poter avere un'uscita agganciabile nello stesso intervallo.
   const findClosingShift = async () => {
     const nowMs = Date.now()
     const dayStart = new Date(nowMs - 24 * 3600 * 1000).toISOString()
@@ -146,14 +161,12 @@ export default function Clock() {
       .gte('start_at', dayStart)
       .lte('start_at', dayEnd)
     if (error || !data) return null
-    const WIN_BEFORE = 15 * 60 * 1000
-    const WIN_AFTER = 60 * 60 * 1000
     // Tra i turni la cui finestra copre "adesso", scegli quello con end_at
     // più vicino a now (il turno che stai effettivamente chiudendo).
     const candidates = data.filter((s) => {
       const start = new Date(s.start_at).getTime()
       const end = new Date(s.end_at).getTime()
-      return nowMs >= start - WIN_BEFORE && nowMs <= end + WIN_AFTER
+      return nowMs >= start - MATCH_WIN_BEFORE_MS && nowMs <= end + MATCH_WIN_AFTER_MS
     })
     if (candidates.length === 0) return null
     candidates.sort((a, b) =>
@@ -234,7 +247,8 @@ export default function Clock() {
           setOutsidePrompt({ kind: 'late', eventType, shiftId: shift.id })
           return
         }
-        // In orario, tollerato (<=5) o oltre +15 (penalità automatica): timbra.
+        // In orario, in anticipo, tollerato (<=5) o oltre +15 (penalità
+        // automatica): timbra. Il trigger conta comunque da S.
         await doInsert(eventType, { shiftId: shift.id })
       } catch (err) {
         setError(err.message)
@@ -603,13 +617,13 @@ const PROMPT_TEXTS = {
   },
   late: {
     title: 'Sei in ritardo',
-    desc: 'Hai timbrato l’entrata in ritardo rispetto all’inizio del turno. Le ore vengono comunque conteggiate dall’inizio turno, ma indica il motivo: il responsabile lo vedrà.',
+    desc: 'Hai timbrato l\u2019entrata in ritardo rispetto all\u2019inizio del turno. Le ore vengono comunque conteggiate dall\u2019inizio turno, ma indica il motivo: il responsabile lo vedrà.',
     placeholder: 'Es. traffico, imprevisto, mezzi in ritardo...',
     confirm: 'Conferma',
   },
   overtime: {
     title: 'Uscita oltre il turno',
-    desc: 'Hai timbrato l’uscita oltre l’orario di fine turno. Indica il motivo dello straordinario: il responsabile deciderà se riconoscerlo.',
+    desc: 'Hai timbrato l\u2019uscita oltre l\u2019orario di fine turno. Indica il motivo dello straordinario: il responsabile deciderà se riconoscerlo.',
     placeholder: 'Es. richiesta cliente, chiusura cassa, imprevisto...',
     confirm: 'Conferma',
   },
