@@ -266,14 +266,15 @@ export default function Clock() {
           return
         }
         // Turno agganciato: calcolo il ritardo rispetto all'inizio turno.
-        // Fascia S+6..S+15 -> il motivo del ritardo è obbligatorio (popup).
+        // Fascia S+6..S+14 -> il motivo del ritardo è obbligatorio (popup).
+        // Da S+15 la penalità è automatica: niente da giustificare, si timbra.
         // (Il confine è valutato lato client sull'ora del click; il trigger
         // ricalcola effective_time sull'ora reale del server. Un eventuale
         // scarto di pochi secondi sul bordo non crea incoerenze: il motivo
         // resta salvato come dato anche se il server classifica di un minuto
         // diverso.)
         const lateMin = (Date.now() - new Date(shift.start_at).getTime()) / 60000
-        if (lateMin >= 6 && lateMin <= 15) {
+        if (lateMin >= 6 && lateMin < 15) {
           setSubmitting(false)
           setOutsideReason('')
           setOutsidePrompt({ kind: 'late', eventType, shiftId: shift.id })
