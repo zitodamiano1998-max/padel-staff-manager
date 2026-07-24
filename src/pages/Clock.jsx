@@ -207,7 +207,7 @@ export default function Clock() {
   }
 
   // Esegue l'insert vero e proprio. shiftId/outside/reason/lateReason opzionali.
-  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null, overtimeReason = null, earlyExitReason = null } = {}) => {
+  const doInsert = async (eventType, { shiftId = null, outside = false, reason = null, lateReason = null, overtimeReason = null, earlyExitReason = null, earlyClockinReason = null } = {}) => {
     const pos = await getCurrentPosition()
 
     let distance = null
@@ -239,6 +239,7 @@ export default function Clock() {
     if (lateReason) payload.late_reason = lateReason
     if (overtimeReason) payload.overtime_reason = overtimeReason
     if (earlyExitReason) payload.early_exit_reason = earlyExitReason
+    if (earlyClockinReason) payload.early_clockin_reason = earlyClockinReason
 
     const { error: insError } = await supabase.from('time_entries').insert(payload)
     if (insError) throw insError
@@ -274,6 +275,18 @@ export default function Clock() {
         // resta salvato come dato anche se il server classifica di un minuto
         // diverso.)
         const lateMin = (Date.now() - new Date(shift.start_at).getTime()) / 60000
+
+        // ENTRATA ANTICIPATA oltre S-5: motivo obbligatorio. Il trigger marca
+        // early_clockin_pending: da che ora contare lo decide il manager
+        // (provvisorio = conta da S, che era il comportamento di prima:
+        // ignorare la card non regala e non toglie nulla).
+        if (lateMin < -5) {
+          setSubmitting(false)
+          setOutsideReason('')
+          setOutsidePrompt({ kind: 'early_clockin', eventType, shiftId: shift.id })
+          return
+        }
+
         if (lateMin >= 6 && lateMin < 15) {
           setSubmitting(false)
           setOutsideReason('')
@@ -372,6 +385,8 @@ export default function Clock() {
         await doInsert(prompt.eventType, { shiftId: prompt.shiftId, overtimeReason: reason })
       } else if (prompt.kind === 'early_exit') {
         await doInsert(prompt.eventType, { shiftId: prompt.shiftId, earlyExitReason: reason })
+      } else if (prompt.kind === 'early_clockin') {
+        await doInsert(prompt.eventType, { shiftId: prompt.shiftId, earlyClockinReason: reason })
       } else {
         await doInsert(prompt.eventType, { outside: true, reason })
       }
@@ -677,6 +692,12 @@ const PROMPT_TEXTS = {
     title: 'Stai uscendo in anticipo',
     desc: 'Stai timbrando l\u2019uscita molto prima della fine del turno. Indica il motivo: il responsabile deciderà fino a che ora conteggiare le ore.',
     placeholder: 'Es. chiusura anticipata, permesso concordato, imprevisto...',
+    confirm: 'Conferma',
+  },
+  early_clockin: {
+    title: 'Sei in anticipo',
+    desc: 'Stai timbrando l\u2019entrata molto prima dell\u2019inizio del turno. Indica il motivo: il responsabile deciderà da che ora conteggiare le ore.',
+    placeholder: 'Es. apertura anticipata, preparazione campi, richiesta del responsabile...',
     confirm: 'Conferma',
   },
 }
