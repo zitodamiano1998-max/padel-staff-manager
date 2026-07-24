@@ -131,14 +131,15 @@ export default function ManagerTodos() {
     await fetchTodos()
   }
 
-  // Decisione manager su straordinario uscita (oltre +14)
-  // action: 'confirm' (conta fine turno E) | 'grant' (conta E+30)
-  const handleOvertimeDecision = async (entryId, action) => {
+  // Decisione manager su straordinario uscita (oltre +14, chiudente incluso)
+  // action: 'confirm' (fine turno E) | 'grant' (E+30) | 'custom' (orario scelto)
+  const handleOvertimeDecision = async (entryId, action, customTime = null) => {
     setDecideError(null)
     setDeciding((d) => ({ ...d, [entryId]: action }))
     const { error } = await supabase.rpc('decide_overtime', {
       p_entry_id: entryId,
       p_action: action,
+      p_custom_time: customTime,
     })
     if (error) {
       setDecideError(error.message || 'Errore nella decisione')
@@ -415,9 +416,11 @@ function TodoTile({ count, label, sub, onClick, tone, icon }) {
 }
 
 // ============================================================================
-// Card decisione straordinario uscita (oltre +14 min)
+// Card decisione straordinario uscita (oltre +14 min, chiudente incluso)
 // item: entry_id, staff_name, scheduled_end, event_time, extra_min, overtime_reason
+// Tre esiti: conferma fine turno / concedi +30 / orario scelto dal manager.
 function OvertimeDecisionCard({ item, deciding, onDecide }) {
+  const [customTime, setCustomTime] = useState('')
   const busy = !!deciding
   const fmt = (iso) =>
     new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
@@ -425,6 +428,15 @@ function OvertimeDecisionCard({ item, deciding, onDecide }) {
   const endLbl = fmt(item.scheduled_end)
   const grantLbl = fmt(new Date(end.getTime() + 30 * 60 * 1000))
   const outLbl = fmt(item.event_time)
+
+  // ISO dell'orario scelto sullo stesso giorno (locale) della fine turno.
+  const applyCustom = () => {
+    if (!customTime) return
+    const [h, m] = customTime.split(':').map(Number)
+    const d = new Date(item.scheduled_end)
+    d.setHours(h, m, 0, 0)
+    onDecide(item.entry_id, 'custom', d.toISOString())
+  }
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
@@ -442,25 +454,46 @@ function OvertimeDecisionCard({ item, deciding, onDecide }) {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={() => onDecide(item.entry_id, 'confirm')}
-            disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage-100 hover:bg-sage-200 border border-sage-300 text-sage-800 font-sans text-xs font-semibold transition disabled:opacity-50">
-            {deciding === 'confirm'
-              ? <Loader2 size={14} className="animate-spin" />
-              : <Check size={14} />}
-            Conferma {endLbl}
-          </button>
-          <button
-            onClick={() => onDecide(item.entry_id, 'grant')}
-            disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 font-sans text-xs font-semibold transition disabled:opacity-50">
-            {deciding === 'grant'
-              ? <Loader2 size={14} className="animate-spin" />
-              : <Check size={14} />}
-            Concedi +30 {grantLbl}
-          </button>
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onDecide(item.entry_id, 'confirm')}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage-100 hover:bg-sage-200 border border-sage-300 text-sage-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+              {deciding === 'confirm'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Conferma {endLbl}
+            </button>
+            <button
+              onClick={() => onDecide(item.entry_id, 'grant')}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+              {deciding === 'grant'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Concedi +30 {grantLbl}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-sans text-xs text-warm-brown">Altro orario:</span>
+            <input
+              type="time"
+              value={customTime}
+              onChange={(e) => setCustomTime(e.target.value)}
+              disabled={busy}
+              className="rounded-lg border border-cream-300 px-2 py-1 font-sans text-xs text-warm-dark focus:outline-none focus:ring-2 focus:ring-terracotta-300 disabled:opacity-50"
+            />
+            <button
+              onClick={applyCustom}
+              disabled={busy || !customTime}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cream-100 hover:bg-cream-200 border border-cream-300 text-warm-dark font-sans text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
+              {deciding === 'custom'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Applica
+            </button>
+          </div>
         </div>
       </div>
     </div>
