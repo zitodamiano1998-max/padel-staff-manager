@@ -14,6 +14,7 @@ export default function ManagerTodos() {
   const [staffList, setStaffList] = useState([])
   const [earlyList, setEarlyList] = useState([])
   const [earlyInList, setEarlyInList] = useState([])
+  const [lateInList, setLateInList] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -30,7 +31,7 @@ export default function ManagerTodos() {
     setError(null)
     // Le uscite anticipate arrivano da una query diretta (non da
     // get_manager_todos): niente RPC da estendere colonna per colonna.
-    const [todosRes, staffRes, earlyRes, earlyInRes] = await Promise.all([
+    const [todosRes, staffRes, earlyRes, earlyInRes, lateInRes] = await Promise.all([
       supabase.rpc('get_manager_todos'),
       supabase.from('staff_members')
         .select('id, first_name, last_name')
@@ -44,6 +45,10 @@ export default function ManagerTodos() {
         .select('id, staff_id, event_time, scheduled_start, early_clockin_reason, staff_members(first_name, last_name)')
         .eq('early_clockin_pending', true)
         .order('event_time', { ascending: false }),
+      supabase.from('time_entries')
+        .select('id, staff_id, event_time, scheduled_start, late_reason, staff_members(first_name, last_name)')
+        .eq('late_clockin_pending', true)
+        .order('event_time', { ascending: false }),
     ])
     setLoading(false)
     if (todosRes.error) {
@@ -54,6 +59,7 @@ export default function ManagerTodos() {
     if (staffRes.data) setStaffList(staffRes.data)
     setEarlyList(earlyRes.data || [])
     setEarlyInList(earlyInRes.data || [])
+    setLateInList(lateInRes.data || [])
   }
 
   useEffect(() => {
@@ -83,10 +89,12 @@ export default function ManagerTodos() {
   const overtimeCount = todos.overtime_decisions?.count || 0
   const earlyCount = earlyList.length
   const earlyInCount = earlyInList.length
+  const lateInCount = lateInList.length
 
   // Stato vuoto: tutto a posto. Gli straordinari sono già in total_actions;
-  // le uscite/entrate anticipate arrivano dalle query dirette, vanno sommate.
-  if (todos.total_actions === 0 && earlyCount === 0 && earlyInCount === 0) {
+  // le uscite/entrate anticipate e i ritardi gravi arrivano dalle query
+  // dirette, vanno sommati.
+  if (todos.total_actions === 0 && earlyCount === 0 && earlyInCount === 0 && lateInCount === 0) {
     return (
       <div className="bg-sage-50 border border-sage-200 rounded-2xl p-5 flex items-center gap-3">
         <CheckCircle2 size={22} className="text-sage-700 flex-shrink-0" />
@@ -100,7 +108,7 @@ export default function ManagerTodos() {
     )
   }
 
-  const totalActions = (todos.total_actions || 0) + earlyCount + earlyInCount
+  const totalActions = (todos.total_actions || 0) + earlyCount + earlyInCount + lateInCount
 
   // Click handler per "Timbrature mancanti" → apre modal precompilato per il primo
   const openMissingClockModal = () => {
@@ -193,6 +201,33 @@ export default function ManagerTodos() {
     setDecideError(null)
     setDeciding((d) => ({ ...d, [entryId]: mode }))
     const { error } = await supabase.rpc('decide_early_clockin', {
+      p_entry_id: entryId,
+      p_mode: mode,
+      p_custom_time: customTime,
+    })
+    if (error) {
+      setDecideError(error.message || 'Errore nella decisione')
+      setDeciding((d) => {
+        const next = { ...d }
+        delete next[entryId]
+        return next
+      })
+      return
+    }
+    await fetchTodos()
+    setDeciding((d) => {
+      const next = { ...d }
+      delete next[entryId]
+      return next
+    })
+  }
+
+  // Decisione manager su ritardo grave (da S+15)
+  // mode: 'confirm' (penalità provvisoria) | 'scheduled' (conta da S, grazia) | 'custom'
+  const handleLateClockinDecision = async (entryId, mode, customTime = null) => {
+    setDecideError(null)
+    setDeciding((d) => ({ ...d, [entryId]: mode }))
+    const { error } = await supabase.rpc('decide_late_clockin', {
       p_entry_id: entryId,
       p_mode: mode,
       p_custom_time: customTime,
@@ -367,6 +402,31 @@ export default function ManagerTodos() {
                   item={item}
                   deciding={deciding[item.id]}
                   onDecide={handleEarlyClockinDecision}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Ritardi gravi (da S+15): il manager sceglie l'orario di ingresso */}
+        {lateInCount > 0 && (
+          <div className={(activeTiles.length > 0 || overtimeCount > 0 || earlyCount > 0 || earlyInCount > 0) ? 'mt-5 pt-5 border-t border-cream-200' : ''}>
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle size={16} className="text-red-500" />
+              <h4 className="font-sans text-sm font-semibold text-warm-dark">
+                Ritardi da decidere
+              </h4>
+              <span className="font-sans text-xs text-warm-brown">
+                ({lateInCount})
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {lateInList.map((item) => (
+                <LateClockinDecisionCard
+                  key={item.id}
+                  item={item}
+                  deciding={deciding[item.id]}
+                  onDecide={handleLateClockinDecision}
                 />
               ))}
             </div>
@@ -653,6 +713,101 @@ function EarlyClockinDecisionCard({ item, deciding, onDecide }) {
                 ? <Loader2 size={14} className="animate-spin" />
                 : <Check size={14} />}
               Riconosci da {inLbl}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-sans text-xs text-warm-brown">Altro orario:</span>
+            <input
+              type="time"
+              value={customTime}
+              onChange={(e) => setCustomTime(e.target.value)}
+              disabled={busy}
+              className="rounded-lg border border-cream-300 px-2 py-1 font-sans text-xs text-warm-dark focus:outline-none focus:ring-2 focus:ring-terracotta-300 disabled:opacity-50"
+            />
+            <button
+              onClick={applyCustom}
+              disabled={busy || !customTime}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cream-100 hover:bg-cream-200 border border-cream-300 text-warm-dark font-sans text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
+              {deciding === 'custom'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Applica
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Card decisione ritardo grave (da S+15)
+// item: id, event_time, scheduled_start, late_reason, staff_members{...}
+// Provvisorio = penalità automatica: greatest(S+30, orario reale).
+// Tre esiti: conferma penalità / conta da S (grazia) / orario scelto.
+function LateClockinDecisionCard({ item, deciding, onDecide }) {
+  const [customTime, setCustomTime] = useState('')
+  const busy = !!deciding
+  const fmt = (iso) =>
+    new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  const inLbl = fmt(item.event_time)
+  const startLbl = fmt(item.scheduled_start)
+  const ritardoMin = Math.round(
+    (new Date(item.event_time).getTime() - new Date(item.scheduled_start).getTime()) / 60000
+  )
+  // Penalità provvisoria: S+30, ma mai prima dell'arrivo reale
+  const provMs = Math.max(
+    new Date(item.scheduled_start).getTime() + 30 * 60 * 1000,
+    new Date(item.event_time).getTime()
+  )
+  const provLbl = fmt(new Date(provMs).toISOString())
+  const staffName = item.staff_members
+    ? `${item.staff_members.first_name} ${item.staff_members.last_name}`
+    : '—'
+
+  const applyCustom = () => {
+    if (!customTime) return
+    const [h, m] = customTime.split(':').map(Number)
+    const d = new Date(item.scheduled_start)
+    d.setHours(h, m, 0, 0)
+    onDecide(item.id, 'custom', d.toISOString())
+  }
+
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-sans text-sm font-semibold text-warm-dark truncate">
+            {staffName}
+          </div>
+          <div className="font-sans text-xs text-warm-brown mt-0.5">
+            Inizio turno {startLbl} · arrivato {inLbl} (+{ritardoMin} min)
+          </div>
+          {item.late_reason && (
+            <div className="font-sans text-xs text-warm-brown italic mt-1">
+              “{item.late_reason}”
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onDecide(item.id, 'confirm')}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+              {deciding === 'confirm'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Conferma penalità {provLbl}
+            </button>
+            <button
+              onClick={() => onDecide(item.id, 'scheduled')}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage-100 hover:bg-sage-200 border border-sage-300 text-sage-800 font-sans text-xs font-semibold transition disabled:opacity-50">
+              {deciding === 'scheduled'
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Check size={14} />}
+              Grazia: conta da {startLbl}
             </button>
           </div>
           <div className="flex items-center gap-2">

@@ -287,7 +287,11 @@ export default function Clock() {
           return
         }
 
-        if (lateMin >= 6 && lateMin < 15) {
+        // Qualsiasi ritardo oltre S+5 -> motivo obbligatorio. Fascia +6..+14:
+        // conta da S (il motivo va nella vista Ritardi). Da +15: penalità
+        // provvisoria (greatest(S+30, arrivo reale)) e card in coda decisioni,
+        // dove il manager sceglie l'orario leggendo il motivo.
+        if (lateMin >= 6) {
           setSubmitting(false)
           setOutsideReason('')
           setOutsidePrompt({ kind: 'late', eventType, shiftId: shift.id })
@@ -678,7 +682,7 @@ const PROMPT_TEXTS = {
   },
   late: {
     title: 'Sei in ritardo',
-    desc: 'Hai timbrato l\u2019entrata in ritardo rispetto all\u2019inizio del turno. Le ore vengono comunque conteggiate dall\u2019inizio turno, ma indica il motivo: il responsabile lo vedrà.',
+    desc: 'Hai timbrato l\u2019entrata in ritardo rispetto all\u2019inizio del turno. Indica il motivo: il responsabile lo vedrà e deciderà l\u2019orario da conteggiare.',
     placeholder: 'Es. traffico, imprevisto, mezzi in ritardo...',
     confirm: 'Conferma',
   },
