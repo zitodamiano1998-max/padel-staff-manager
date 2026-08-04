@@ -144,7 +144,7 @@ function EmployeeDashboard({ profile }) {
       {/* Responsabili d'area: dashboard da dipendente (timbrano anche loro)
           + le decisioni della PROPRIA area in cima. Le card e i conteggi
           sono già filtrati lato database (get_manager_todos v2 + RLS). */}
-      {profile?.is_area_manager && <ManagerTodos />}
+      {profile?.is_area_manager && profile?.receives_todos && <ManagerTodos />}
 
       {/* Banner positivo: ferie approvata recente */}
       {data.recentApprovedLeave && (
@@ -289,8 +289,10 @@ function ManagerDashboard({ profile }) {
         <h1 className="text-4xl text-warm-dark">{profile?.first_name}</h1>
       </div>
 
-      {/* Cose da fare - sezione completa */}
-      <ManagerTodos />
+      {/* Cose da fare: solo a chi gestisce l'operatività (direzione operativa
+          e responsabili d'area). I soci non operativi vedono tutto il resto
+          ma non la coda di decisioni. */}
+      {profile?.receives_todos && <ManagerTodos />}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <KpiCard to="/planning" icon={<Calendar size={18} />}
