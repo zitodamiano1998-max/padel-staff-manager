@@ -15,7 +15,13 @@ import {
 
 export default function Timesheets() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Tre livelli: direzione pura (tutto), responsabile d'area (solo la sua
+  // area, anche se è anche direzione — semantica "scoped wins" già usata in
+  // Planning e nella RLS), dipendente (solo se stesso).
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
+  const scopedToOwnArea = isAreaManager && !!profile?.area
   const myId = profile?.id
 
   const [rangeMode, setRangeMode] = useState('week')
@@ -96,11 +102,18 @@ export default function Timesheets() {
     const promises = [entriesQuery]
     if (isManager) {
       promises.push(
-        supabase
-          .from('staff_members')
-          .select('id, first_name, last_name, roles(id, name, color)')
-          .eq('is_active', true)
-          .order('first_name')
+        (scopedToOwnArea
+          ? supabase
+              .from('staff_members')
+              .select('id, first_name, last_name, area, roles(id, name, color)')
+              .eq('is_active', true)
+              .eq('area', profile.area)
+              .order('first_name')
+          : supabase
+              .from('staff_members')
+              .select('id, first_name, last_name, area, roles(id, name, color)')
+              .eq('is_active', true)
+              .order('first_name'))
       )
     }
 
