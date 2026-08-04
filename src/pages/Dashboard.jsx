@@ -141,6 +141,11 @@ function EmployeeDashboard({ profile }) {
         <h1 className="text-4xl text-warm-dark">{profile?.first_name}</h1>
       </div>
 
+      {/* Responsabili d'area: dashboard da dipendente (timbrano anche loro)
+          + le decisioni della PROPRIA area in cima. Le card e i conteggi
+          sono già filtrati lato database (get_manager_todos v2 + RLS). */}
+      {profile?.is_area_manager && <ManagerTodos />}
+
       {/* Banner positivo: ferie approvata recente */}
       {data.recentApprovedLeave && (
         <PositiveBanner leave={data.recentApprovedLeave} />
