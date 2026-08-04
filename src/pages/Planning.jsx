@@ -53,7 +53,14 @@ function buildStaffColorMap(staff = []) {
 
 export default function Planning() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Tre livelli: direzione (tutto), responsabile d'area (solo la sua area),
+  // dipendente (sola lettura). isManager resta il nome usato da tutti i
+  // controlli di editing a valle: ora vale per entrambi i livelli gestori,
+  // mentre il PERIMETRO è garantito dal filtro sullo staff qui sotto e dalla
+  // RLS (shifts_area_manager_write) lato database.
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
   // Chi può vedere il planning completo (tutti i turni) in sola lettura:
   // i manager, più i soci/responsabili esenti da timbratura. Questi ultimi
   // vedono l'intera griglia ma NON possono modificarla (isManager resta false
@@ -150,7 +157,7 @@ export default function Planning() {
     const [staffRes, rolesRes, shiftsRes, templatesRes, availRes, leavesRes, eventsRes] = await Promise.all([
       supabase
         .from('staff_roster')
-        .select('id, first_name, last_name, role_id')
+        .select('id, first_name, last_name, role_id, area')
         .order('first_name'),
       supabase
         .from('roles')
@@ -186,7 +193,17 @@ export default function Planning() {
         .gte('end_date', weekStartDate)
         .order('start_date'),
     ])
-    if (!staffRes.error) setStaff(staffRes.data || [])
+    if (!staffRes.error) {
+      const list = staffRes.data || []
+      // Un responsabile d'area vede e pianifica SOLO la sua area: filtrando
+      // qui, la griglia, il modale turno e il copia-settimana ereditano tutti
+      // il perimetro corretto. La direzione vede tutti.
+      setStaff(
+        isDirection || !profile?.area
+          ? list
+          : list.filter((s) => s.area === profile.area)
+      )
+    }
     if (!rolesRes.error) setRoles(rolesRes.data || [])
     if (!shiftsRes.error) setShifts(shiftsRes.data || [])
     if (!templatesRes.error) setTemplates(templatesRes.data || [])
