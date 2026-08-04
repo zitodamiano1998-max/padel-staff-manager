@@ -61,6 +61,12 @@ export default function Planning() {
   const isDirection = profile?.is_manager === true
   const isAreaManager = profile?.is_area_manager === true
   const isManager = isDirection || isAreaManager
+  // PERIMETRO: chi è responsabile di un'area lavora nella SUA area, anche se
+  // è anche direzione (caso Dario: manager + responsabile reception). Chi è
+  // direzione "pura" (nessuna area assegnata come responsabile) vede tutti e
+  // può restringere col filtro in toolbar.
+  const scopedToOwnArea = isAreaManager && !!profile?.area
+  const [areaFilter, setAreaFilter] = useState('all')
   // Chi può vedere il planning completo (tutti i turni) in sola lettura:
   // i manager, più i soci/responsabili esenti da timbratura. Questi ultimi
   // vedono l'intera griglia ma NON possono modificarla (isManager resta false
@@ -115,7 +121,7 @@ export default function Planning() {
   useEffect(() => {
     fetchData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart, monthAnchor, viewMode])
+  }, [weekStart, monthAnchor, viewMode, areaFilter])
 
   // Carica il partner collegato (chi mi ha come notify_partner_id). Una volta
   // per utente: la relazione non cambia settimana per settimana. Se la RLS non
@@ -195,14 +201,16 @@ export default function Planning() {
     ])
     if (!staffRes.error) {
       const list = staffRes.data || []
-      // Un responsabile d'area vede e pianifica SOLO la sua area: filtrando
-      // qui, la griglia, il modale turno e il copia-settimana ereditano tutti
-      // il perimetro corretto. La direzione vede tutti.
-      setStaff(
-        isDirection || !profile?.area
-          ? list
-          : list.filter((s) => s.area === profile.area)
-      )
+      // Responsabile d'area (Dario per la reception, Vittoria per il bar):
+      // vede e pianifica SOLO la sua area, anche se ha anche i poteri di
+      // direzione. Direzione pura (soci): vede tutti, con filtro opzionale.
+      let visible = list
+      if (scopedToOwnArea) {
+        visible = list.filter((s) => s.area === profile.area)
+      } else if (isDirection && areaFilter !== 'all') {
+        visible = list.filter((s) => s.area === areaFilter)
+      }
+      setStaff(visible)
     }
     if (!rolesRes.error) setRoles(rolesRes.data || [])
     if (!shiftsRes.error) setShifts(shiftsRes.data || [])
@@ -554,6 +562,17 @@ export default function Planning() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {isDirection && !scopedToOwnArea && (
+            <select
+              value={areaFilter}
+              onChange={(e) => setAreaFilter(e.target.value)}
+              title="Filtra il personale per area"
+              className="px-3 py-2 rounded-xl border border-cream-300 bg-white font-sans text-sm font-semibold text-warm-dark focus:outline-none focus:border-terracotta-400 transition">
+              <option value="all">Tutte le aree</option>
+              <option value="reception">Reception</option>
+              <option value="bar">Bar</option>
+            </select>
+          )}
           <div className="flex bg-cream-200 rounded-xl p-1">
             <button onClick={() => setViewMode('week')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-sans text-sm font-semibold transition ${
