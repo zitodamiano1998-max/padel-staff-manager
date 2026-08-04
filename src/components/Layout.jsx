@@ -132,7 +132,7 @@ export default function Layout({ children }) {
                 {profile?.first_name} {profile?.last_name}
               </div>
               <div className="font-sans text-xs text-warm-brown leading-tight mt-0.5">
-                {profile?.role_name}{profile?.is_manager && ' · Manager'}
+                {profile?.role_name}{profile?.is_manager ? ' · Manager' : profile?.is_area_manager ? ' · Responsabile' : null}
               </div>
             </Link>
             <Link to="/profilo"
