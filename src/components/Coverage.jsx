@@ -13,7 +13,12 @@ import { formatDayLong, formatTimeFromISO } from '../lib/dateUtils'
 // ============================================================================
 export default function CoverageTab({ onToast }) {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Direzione o responsabile d'area (semantica "scoped wins" come nel resto
+  // dell'app): i responsabili operano solo dentro la propria area.
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
+  const scopedToOwnArea = isAreaManager && !!profile?.area
   const [loading, setLoading] = useState(true)
   const [requests, setRequests] = useState([])
   const [myInvitations, setMyInvitations] = useState([])
@@ -455,11 +460,14 @@ function CoverageRequestModal({ onClose, onCreated, onError }) {
     setShifts(availableShifts)
 
     // Tutti i dipendenti attivi (escluso il manager stesso non importa, comunque vediamo tutti)
-    const { data: staffData } = await supabase
+    let staffQuery = supabase
       .from('staff_members')
-      .select('id, first_name, last_name, role_id, is_manager')
+      .select('id, first_name, last_name, role_id, is_manager, area')
       .eq('is_active', true)
       .order('first_name')
+    // Un responsabile invita a coprire solo persone della propria area
+    if (scopedToOwnArea) staffQuery = staffQuery.eq('area', profile.area)
+    const { data: staffData } = await staffQuery
     setStaff(staffData || [])
 
     setLoading(false)

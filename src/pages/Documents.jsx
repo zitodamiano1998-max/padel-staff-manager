@@ -21,7 +21,12 @@ const MAX_BYTES = 10 * 1024 * 1024 // 10MB
 
 export default function Documents() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Direzione o responsabile d'area (semantica "scoped wins" come nel resto
+  // dell'app): i responsabili operano solo dentro la propria area.
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
+  const scopedToOwnArea = isAreaManager && !!profile?.area
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState([])
   const [types, setTypes] = useState([])
@@ -75,11 +80,13 @@ export default function Documents() {
 
     // Staff (solo manager per il filtro)
     if (isManager) {
-      const { data: staffData } = await supabase
+      let staffQuery = supabase
         .from('staff_members')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, area')
         .eq('is_active', true)
         .order('first_name')
+      if (scopedToOwnArea) staffQuery = staffQuery.eq('area', profile.area)
+      const { data: staffData } = await staffQuery
       setStaff(staffData || [])
     }
 
