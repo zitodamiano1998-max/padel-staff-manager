@@ -12,7 +12,10 @@ const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab']
 
 export default function Stats() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Direzione o responsabile d'area: entrambi accedono alle statistiche.
+  // I DATI sono già filtrati per area dalla RLS (time_entries, shifts) e da
+  // late_behavior_summary, quindi qui non serve altro filtro.
+  const isManager = profile?.is_manager === true || profile?.is_area_manager === true
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
