@@ -58,6 +58,10 @@ export default function Layout({ children }) {
   }
 
   const isMagazzinoAdmin = profile?.id === MAGAZZINO_ADMIN_STAFF_ID
+  // "Gestore" = direzione oppure responsabile d'area: entrambi vedono le voci
+  // operative (Timbrature, Statistiche). Anagrafica e Impostazioni restano
+  // alla sola direzione.
+  const isGestore = profile?.is_manager === true || profile?.is_area_manager === true
 
   return (
     <div className="min-h-screen bg-cream-100">
@@ -96,9 +100,9 @@ export default function Layout({ children }) {
               Scambi
             </NavLink>
             <NavLink to="/timesheets" icon={<ListChecks size={16} />} active={isActive('/timesheets')}>
-              {profile?.is_manager ? 'Timbrature' : 'Mie ore'}
+              {isGestore ? 'Timbrature' : 'Mie ore'}
             </NavLink>
-            {!profile?.is_manager && (
+            {!isGestore && (
               <NavLink to="/my-calendar" icon={<CalendarPlus size={16} />} active={isActive('/my-calendar')}>
                 Calendario
               </NavLink>
@@ -106,13 +110,15 @@ export default function Layout({ children }) {
             <NavLink to="/documents" icon={<FolderOpen size={16} />} active={isActive('/documents')}>
               Documenti
             </NavLink>
+            {isGestore && (
+              <NavLink to="/stats" icon={<BarChart3 size={16} />} active={isActive('/stats')}>
+                Statistiche
+              </NavLink>
+            )}
             {profile?.is_manager && (
               <>
                 <NavLink to="/staff" icon={<Users size={16} />} active={isActive('/staff')}>
                   Anagrafica
-                </NavLink>
-                <NavLink to="/stats" icon={<BarChart3 size={16} />} active={isActive('/stats')}>
-                  Statistiche
                 </NavLink>
                 <NavLink to="/settings" icon={<SettingsIcon size={16} />} active={isActive('/settings')}>
                   Impostazioni
