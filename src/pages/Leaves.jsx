@@ -24,7 +24,12 @@ const STATUS_INFO = {
 
 export default function Leaves() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Tre livelli: direzione pura (tutto), responsabile d'area (solo la sua area
+  // anche se è anche direzione — semantica "scoped wins"), dipendente (sé).
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
+  const scopedToOwnArea = isAreaManager && !!profile?.area
 
   const [staff, setStaff] = useState([])
   const [leaves, setLeaves] = useState([])
@@ -50,11 +55,18 @@ export default function Leaves() {
     ]
     if (isManager) {
       promises.push(
-        supabase
-          .from('staff_members')
-          .select('id, first_name, last_name')
-          .eq('is_active', true)
-          .order('first_name')
+        (scopedToOwnArea
+          ? supabase
+              .from('staff_members')
+              .select('id, first_name, last_name, area')
+              .eq('is_active', true)
+              .eq('area', profile.area)
+              .order('first_name')
+          : supabase
+              .from('staff_members')
+              .select('id, first_name, last_name, area')
+              .eq('is_active', true)
+              .order('first_name'))
       )
     }
     const [lRes, sRes] = await Promise.all(promises)

@@ -19,7 +19,12 @@ const STATUS_INFO = {
 
 export default function Swaps() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Tre livelli: direzione pura (tutto), responsabile d'area (solo la sua area
+  // anche se è anche direzione — semantica "scoped wins"), dipendente (sé).
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
+  const scopedToOwnArea = isAreaManager && !!profile?.area
   const myId = profile?.id
 
   const [swaps, setSwaps] = useState([])

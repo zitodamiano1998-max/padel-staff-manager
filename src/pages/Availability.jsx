@@ -6,7 +6,12 @@ import { Plus, Trash2, Calendar, X, CalendarOff } from 'lucide-react'
 
 export default function Availability() {
   const { profile } = useAuth()
-  const isManager = profile?.is_manager
+  // Tre livelli: direzione pura (tutto), responsabile d'area (solo la sua area
+  // anche se è anche direzione — semantica "scoped wins"), dipendente (sé).
+  const isDirection = profile?.is_manager === true
+  const isAreaManager = profile?.is_area_manager === true
+  const isManager = isDirection || isAreaManager
+  const scopedToOwnArea = isAreaManager && !!profile?.area
 
   const [staff, setStaff] = useState([])
   const [items, setItems] = useState([])
@@ -30,11 +35,18 @@ export default function Availability() {
     ]
     if (isManager) {
       promises.push(
-        supabase
-          .from('staff_members')
-          .select('id, first_name, last_name')
-          .eq('is_active', true)
-          .order('first_name')
+        (scopedToOwnArea
+          ? supabase
+              .from('staff_members')
+              .select('id, first_name, last_name, area')
+              .eq('is_active', true)
+              .eq('area', profile.area)
+              .order('first_name')
+          : supabase
+              .from('staff_members')
+              .select('id, first_name, last_name, area')
+              .eq('is_active', true)
+              .order('first_name'))
       )
     }
     const [aRes, sRes] = await Promise.all(promises)
